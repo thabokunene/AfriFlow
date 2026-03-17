@@ -1,0 +1,92 @@
+# config/currency_thresholds.yml
+
+# Currency event detection thresholds.
+# Different currencies have different volatility profiles.
+#
+# DISCLAIMER: This project is not sanctioned by, affiliated with, or
+# endorsed by Standard Bank Group, MTN Group, or any of their subsidiaries.
+
+thresholds:
+  NGN:
+    devaluation_pct: 8.0
+    rapid_depreciation_pct: 4.0
+    parallel_divergence_pct: 15.0
+    notes: "Nigeria. High volatility. Multiple devaluation episodes 2022 to 2024."
+
+  ZAR:
+    devaluation_pct: 12.0
+    rapid_depreciation_pct: 6.0
+    parallel_divergence_pct: 25.0
+    notes: "South Africa. Relatively liquid. Higher thresholds."
+
+  KES:
+    devaluation_pct: 10.0
+    rapid_depreciation_pct: 5.0
+    parallel_divergence_pct: 20.0
+    notes: "Kenya. Moderate volatility."
+
+  GHS:
+    devaluation_pct: 8.0
+    rapid_depreciation_pct: 4.0
+    parallel_divergence_pct: 15.0
+    notes: "Ghana. Significant depreciation history 2022 to 2023."
+
+  ZMW:
+    devaluation_pct: 10.0
+    rapid_depreciation_pct: 5.0
+    parallel_divergence_pct: 20.0
+    notes: "Zambia. Copper price correlated."
+
+  AOA:
+    devaluation_pct: 8.0
+    rapid_depreciation_pct: 3.0
+    parallel_divergence_pct: 10.0
+    notes: "Angola. Oil dependent. History of large devaluations."
+
+  MZN:
+    devaluation_pct: 10.0
+    rapid_depreciation_pct: 5.0
+    parallel_divergence_pct: 20.0
+    notes: "Mozambique. Moderate volatility. Gas export potential."
+
+  XOF:
+    devaluation_pct: 15.0
+    rapid_depreciation_pct: 8.0
+    parallel_divergence_pct: 25.0
+    notes: "CFA franc. Pegged to EUR. Very stable. High thresholds."
+
+  TZS:
+    devaluation_pct: 10.0
+    rapid_depreciation_pct: 5.0
+    parallel_divergence_pct: 20.0
+    notes: "Tanzania. Moderate volatility."
+
+  UGX:
+    devaluation_pct: 10.0
+    rapid_depreciation_pct: 5.0
+    parallel_divergence_pct: 20.0
+    notes: "Uganda. Moderate volatility."
+
+  CDF:
+    devaluation_pct: 8.0
+    rapid_depreciation_pct: 3.0
+    parallel_divergence_pct: 10.0
+    notes: "DRC. High volatility. Limited forex market depth."
+
+  RWF:
+    devaluation_pct: 10.0
+    rapid_depreciation_pct: 5.0
+    parallel_divergence_pct: 20.0
+    notes: "Rwanda. Managed float. Relatively stable."
+
+  BWP:
+    devaluation_pct: 12.0
+    rapid_depreciation_pct: 6.0
+    parallel_divergence_pct: 25.0
+    notes: "Botswana. Pula basket peg. Very stable."
+
+  NAD:
+    devaluation_pct: 12.0
+    rapid_depreciation_pct: 6.0
+    parallel_divergence_pct: 25.0
+    notes: "Namibia. Pegged 1:1 to ZAR."

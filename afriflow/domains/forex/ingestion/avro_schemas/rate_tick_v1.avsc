@@ -1,0 +1,23 @@
+{
+  "type": "record",
+  "name": "FXRateTick",
+  "namespace": "com.afriflow.forex.v1",
+  "doc": "FX rate tick. Includes parallel market rates for NGN, AOA, ETB, ZWL.",
+  "fields": [
+    {"name": "tick_id", "type": "string"},
+    {"name": "currency_pair", "type": "string", "doc": "e.g. USD/ZAR, USD/NGN"},
+    {"name": "base_currency", "type": "string"},
+    {"name": "quote_currency", "type": "string"},
+    {"name": "mid_rate", "type": "double"},
+    {"name": "bid_rate", "type": "double"},
+    {"name": "ask_rate", "type": "double"},
+    {"name": "spread_bps", "type": "double"},
+    {"name": "parallel_rate", "type": ["null", "double"], "default": null},
+    {"name": "parallel_divergence_pct", "type": ["null", "double"], "default": null},
+    {"name": "is_indicative", "type": "boolean", "default": false},
+    {"name": "source", "type": "string", "doc": "reuters | bloomberg | central_bank | parallel_market"},
+    {"name": "tick_timestamp", "type": "string"},
+    {"name": "ingested_at", "type": "string"},
+    {"name": "schema_version", "type": "string", "default": "1.0"}
+  ]
+}

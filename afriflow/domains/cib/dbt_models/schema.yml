@@ -1,0 +1,275 @@
+version: 2
+
+#
+# CIB Domain dbt Schema Definitions
+#
+# We define tests, documentation, and column metadata
+# for all CIB domain models.
+#
+# Disclaimer: This project is not sanctioned by Standard Bank Group.
+#
+
+models:
+  # ------------------------------------------------------------------------
+  # Staging Models
+  # ------------------------------------------------------------------------
+  - name: stg_cib_payments
+    description: >
+      Staged and cleaned CIB payment records from the raw Kafka ingestion layer.
+      We perform type casting, normalization, and validation at this layer.
+    columns:
+      - name: transaction_id
+        description: Unique payment transaction identifier (UUID format)
+        tests:
+          - unique
+          - not_null
+          - dbt_expectations.expect_column_values_to_match_regex:
+              regex: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+      - name: timestamp
+        description: Payment timestamp in UTC
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_of_type:
+              column_type: TIMESTAMP
+
+      - name: payment_date
+        description: Date portion of the payment timestamp
+        tests:
+          - not_null
+
+      - name: amount
+        description: Payment amount in the transaction currency
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0.01
+
+      - name: currency
+        description: ISO 4217 currency code (3 uppercase letters)
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_match_regex:
+              regex: "^[A-Z]{3}$"
+          - accepted_values:
+              values: ['USD', 'EUR', 'ZAR', 'NGN', 'KES', 'GHS', 'GBP', 'CNY', 'AED']
+
+      - name: sender_name
+        description: Debtor company name
+        tests:
+          - not_null
+
+      - name: sender_country
+        description: ISO 3166-1 alpha-2 sender country code
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_match_regex:
+              regex: "^[A-Z]{2}$"
+
+      - name: beneficiary_name
+        description: Creditor company name
+        tests:
+          - not_null
+
+      - name: beneficiary_country
+        description: ISO 3166-1 alpha-2 beneficiary country code
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_match_regex:
+              regex: "^[A-Z]{2}$"
+
+      - name: status
+        description: Payment status
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['COMPLETED', 'PENDING', 'FAILED']
+
+      - name: purpose_code
+        description: ISO 20022 purpose code
+        tests:
+          - dbt_expectations.expect_column_values_to_be_in_set:
+              value_set: ['CORT', 'INTC', 'DIVI', 'SALA', 'TREA']
+
+      - name: corridor
+        description: Payment corridor (sender_country-beneficiary_country)
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_match_regex:
+              regex: "^[A-Z]{2}-[A-Z]{2}$"
+
+      - name: is_cross_border
+        description: Flag indicating cross-border payment
+        tests:
+          - not_null
+
+    # Freshness and freshness tests
+    freshness:
+      warn_after: { count: 1, period: hour }
+      error_after: { count: 4, period: hour }
+
+  # ------------------------------------------------------------------------
+  # Intermediate Models
+  # ------------------------------------------------------------------------
+  - name: int_cib_enriched
+    description: >
+      Enriched CIB payments with client segmentation, corridor risk ratings,
+      and derived analytics flags.
+    columns:
+      - name: transaction_id
+        description: Unique payment transaction identifier
+        tests:
+          - unique
+          - not_null
+
+      - name: client_segment
+        description: Client tier based on payment volume
+        tests:
+          - accepted_values:
+              values: ['tier_1_enterprise', 'tier_2_corporate', 'tier_3_sme', 'tier_4_small']
+
+      - name: corridor_risk_rating
+        description: Risk rating for the payment corridor
+        tests:
+          - accepted_values:
+              values: ['low', 'medium', 'high', 'critical']
+
+      - name: has_fx_exposure
+        description: Flag indicating FX exposure exists
+        tests:
+          - not_null
+
+      - name: is_repeat_client
+        description: Flag indicating client has made multiple payments
+        tests:
+          - not_null
+
+      - name: payment_value_band
+        description: Transaction value categorization
+        tests:
+          - accepted_values:
+              values: ['mega', 'large', 'medium', 'small']
+
+  # ------------------------------------------------------------------------
+  # Mart Models
+  # ------------------------------------------------------------------------
+  - name: mart_cib_corridor_analytics
+    description: >
+      Aggregated corridor-level analytics including volume trends,
+      success rates, and growth indicators. Powers corridor intelligence dashboards.
+    columns:
+      - name: corridor
+        description: Payment corridor identifier
+        tests:
+          - not_null
+
+      - name: payment_date
+        description: Analytics date
+        tests:
+          - not_null
+
+      - name: daily_transactions
+        description: Number of transactions on this date
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+
+      - name: daily_volume_usd
+        description: Total USD volume on this date
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+
+      - name: success_rate_pct
+        description: Percentage of successful transactions
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 100
+
+      - name: volume_growth_pct
+        description: Day-over-day volume growth percentage
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: -100
+              max_value: 10000
+
+  - name: mart_cib_client_flows
+    description: >
+      Aggregated client-level flow analytics including expansion signals,
+      growth indicators, and client health scores. Powers expansion detection.
+    columns:
+      - name: client_name
+        description: Client company name
+        tests:
+          - not_null
+
+      - name: home_country
+        description: Client home country code
+        tests:
+          - not_null
+
+      - name: month
+        description: Analytics month
+        tests:
+          - not_null
+
+      - name: monthly_volume_usd
+        description: Total USD volume for the month
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+
+      - name: is_expanding
+        description: Flag indicating client is expanding to new markets
+        tests:
+          - not_null
+
+      - name: is_high_growth
+        description: Flag indicating >20% month-over-month growth
+        tests:
+          - not_null
+
+      - name: client_health_score
+        description: Composite client health score (0-100)
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 100
+
+# ------------------------------------------------------------------------
+# Sources
+# ------------------------------------------------------------------------
+sources:
+  - name: cib
+    description: CIB domain source tables from Kafka ingestion
+    database: afriflow_raw
+    schema: cib
+
+    tables:
+      - name: payments_raw
+        description: Raw payment events from Kafka
+        columns:
+          - name: transaction_id
+            tests:
+              - unique
+              - not_null
+
+      - name: client_master
+        description: Client master data reference table
+
+      - name: corridor_risk_ratings
+        description: Corridor risk rating reference table
+
+# ------------------------------------------------------------------------
+# Macros (test definitions)
+# ------------------------------------------------------------------------
+macros:
+  - name: assert_no_negative_amounts
+    description: Assert that all payment amounts are positive
+
+  - name: assert_valid_country_codes
+    description: Assert that country codes are valid ISO 3166-1 alpha-2

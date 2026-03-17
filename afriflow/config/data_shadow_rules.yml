@@ -1,0 +1,82 @@
+# config/data_shadow_rules.yml
+
+# Data shadow detection rules.
+# We infer expected domain presence from cross domain evidence.
+#
+# DISCLAIMER: This project is not sanctioned by, affiliated with, or
+# endorsed by Standard Bank Group, MTN Group, or any of their subsidiaries.
+
+rules:
+  - name: cib_implies_forex
+    description: >
+      If a client has CIB payments in a foreign currency,
+      we expect corresponding forex hedging activity.
+    source_domain: cib
+    expected_domain: forex
+    condition: "cib.corridors contains foreign currency payments"
+    confidence: 0.85
+    shadow_category: COMPETITIVE_LEAKAGE
+    revenue_estimation_method: "0.3% of estimated unhedged exposure"
+
+  - name: cib_implies_cell
+    description: >
+      If a client has CIB activity in a country where MTN operates,
+      we expect cell data showing corporate SIM presence.
+    source_domain: cib
+    expected_domain: cell
+    condition: "cib.active_countries intersects mtn.coverage_countries"
+    confidence: 0.70
+    shadow_category: COMPETITIVE_LEAKAGE
+    revenue_estimation_method: "estimated telco revenue share"
+
+  - name: cell_implies_pbb
+    description: >
+      If a client has 50 or more corporate SIMs (employees),
+      we expect those employees to have PBB payroll accounts.
+    source_domain: cell
+    expected_domain: pbb
+    condition: "cell.corporate_sim_count >= 50"
+    confidence: 0.75
+    shadow_category: COMPETITIVE_LEAKAGE
+    revenue_estimation_method: "R2500 per deflated employee per year"
+
+  - name: cib_implies_insurance
+    description: >
+      If a client has significant CIB activity with supplier payments
+      indicating physical operations, we expect insurance coverage.
+    source_domain: cib
+    expected_domain: insurance
+    condition: "cib.annual_value > 10M and cib.payment_types includes SUPPLIER"
+    confidence: 0.65
+    shadow_category: COVERAGE_GAP
+    revenue_estimation_method: "0.2% of estimated asset value"
+
+  - name: cib_forex_hedge_gap
+    description: >
+      If a client trades FX spot regularly but has low forward
+      or option coverage, they may be carrying unhedged exposure.
+    source_domain: forex
+    expected_domain: forex
+    condition: "forex.spot_volume_90d > 50M and hedge_ratio < 30%"
+    confidence: 0.80
+    shadow_category: COVERAGE_GAP
+    revenue_estimation_method: "0.2% of unhedged notional"
+
+mtn_coverage_countries:
+  - ZA
+  - NG
+  - GH
+  - UG
+  - RW
+  - ZM
+  - MZ
+  - CI
+  - CM
+  - BJ
+  - CG
+  - GW
+  - LR
+  - SD
+  - SS
+  - SZ
+  - BW

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: afriflow
+  labels:
+    name: afriflow
+    environment: production
+    ManagedBy: Terraform

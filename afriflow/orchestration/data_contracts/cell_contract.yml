@@ -1,0 +1,132 @@
+# orchestration/data_contracts/cell_contract.yml
+#
+# Data contract for the Cell Network (MTN Partnership)
+# domain.
+#
+# We support three integration tiers because the MTN
+# data feed maturity varies by country. The contract
+# specifies minimum requirements for each tier.
+#
+# Disclaimer:
+#   This project is not sanctioned by, affiliated with,
+#   or endorsed by Standard Bank Group, MTN Group, or
+#   any affiliated entity. It is a demonstration of
+#   concept, domain knowledge, and data engineering
+#   skill by Thabo Kunene.
+
+contract:
+  name: "Cell Network Data Contract"
+  version: "1.0"
+  domain: "cell"
+  owner: "MTN Integration Team"
+  description: >
+    We receive corporate SIM activation, usage, and
+    mobile money data from the MTN strategic partnership.
+    Data availability and latency vary by country
+    depending on the integration tier.
+
+integration_tiers:
+  tier_1:
+    description: "Real-time event stream via Kafka Connect"
+    latency: "sub-minute"
+    countries:
+      - "ZA"
+    data_available:
+      - "sim_activations"
+      - "data_usage"
+      - "momo_transactions"
+      - "airtime_purchases"
+
+  tier_2:
+    description: "Daily batch SFTP of aggregated metrics"
+    latency: "24 hours"
+    countries:
+      - "NG"
+      - "GH"
+      - "UG"
+    data_available:
+      - "sim_activations_daily_aggregate"
+      - "data_usage_daily_aggregate"
+      - "momo_transactions_daily_aggregate"
+
+  tier_3:
+    description: "Monthly report with summary metrics"
+    latency: "30 days"
+    countries:
+      - "CD"
+      - "CI"
+      - "MZ"
+      - "ZM"
+    data_available:
+      - "sim_count_monthly"
+      - "momo_volume_monthly"
+
+schema:
+  topic: "cell.activations.raw"
+  fields:
+    - name: "corporate_client_id"
+      type: "string"
+      required: true
+    - name: "activation_country"
+      type: "string"
+      required: true
+      pattern: "^[A-Z]{2}$"
+    - name: "activation_date"
+      type: "string"
+      required: true
+      format: "date"
+    - name: "sim_count"
+      type: "integer"
+      required: true
+      minimum: 0
+    - name: "city"
+      type: "string"
+      required: false
+    - name: "data_usage_mb"
+      type: "double"
+      required: false
+    - name: "integration_tier"
+      type: "integer"
+      required: true
+      enum: [1, 2, 3]
+
+quality:
+  completeness:
+    corporate_client_id: 0.99
+    activation_country: 0.99
+    sim_count: 1.0
+    city: 0.60
+  freshness:
+    tier_1_max_latency_seconds: 60
+    tier_2_max_latency_hours: 24
+    tier_3_max_latency_days: 30
+
+privacy:
+  pii_fields:
+    - "individual_sim_msisdn"
+    - "employee_name"
+    - "employee_id_number"
+  note: >
+    We do NOT receive individual CDR or subscriber-level
+    PII. All cell data is aggregated at the corporate
+    client level. Individual employee identifiers are
+    never transmitted. This is by design for RICA and
+    POPIA compliance.
+
+consumers:
+  - name: "Expansion Detector"
+    team: "AfriFlow Cross-Domain Signals"
+    usage: "SIM activation patterns for expansion detection"
+  - name: "SIM Deflation Model"
+    team: "AfriFlow Integration"
+    usage: "Workforce estimation from SIM counts"
+  - name: "Data Shadow Model"
+    team: "AfriFlow Cross-Domain Signals"
+    usage: "Detecting absence of expected cell data"
+
+evolution:
+  compatibility: "BACKWARD"
+  deprecation_notice_days: 90
+  current_version: "v1"
+  previous_version: null
+  breaking_changes: []

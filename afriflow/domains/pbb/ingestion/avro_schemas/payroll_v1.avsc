@@ -1,0 +1,21 @@
+{
+  "type": "record",
+  "name": "PayrollRun",
+  "namespace": "com.afriflow.pbb.v1",
+  "doc": "Corporate payroll run. The key data link between CIB employer and PBB employee accounts.",
+  "fields": [
+    {"name": "payroll_id", "type": "string"},
+    {"name": "employer_id", "type": "string", "doc": "CIB corporate client ID"},
+    {"name": "employer_golden_id", "type": ["null", "string"], "default": null},
+    {"name": "country", "type": "string"},
+    {"name": "currency", "type": "string"},
+    {"name": "payroll_date", "type": "string"},
+    {"name": "employee_count", "type": "int"},
+    {"name": "total_amount", "type": "double"},
+    {"name": "avg_salary", "type": "double"},
+    {"name": "is_regular", "type": "boolean", "doc": "False if delayed, ad-hoc, or irregular"},
+    {"name": "days_from_expected", "type": "int", "default": 0, "doc": "0=on time, positive=late days"},
+    {"name": "ingested_at", "type": "string"},
+    {"name": "schema_version", "type": "string", "default": "1.0"}
+  ]
+}

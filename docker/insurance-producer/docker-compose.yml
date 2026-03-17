@@ -1,0 +1,192 @@
+# Docker Compose for AfriFlow Insurance Kafka Producer
+# Includes Kafka, Schema Registry, and monitoring stack
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Zookeeper (required for Kafka)
+  # ============================================================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: afriflow-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - afriflow-network
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+
+  # ============================================================================
+  # Kafka Broker
+  # ============================================================================
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: afriflow-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: 300000
+    networks:
+      - afriflow-network
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+  # ============================================================================
+  # Schema Registry
+  # ============================================================================
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.0
+    container_name: afriflow-schema-registry
+    depends_on:
+      - kafka
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: BACKWARD
+    networks:
+      - afriflow-network
+
+  # ============================================================================
+  # Insurance Kafka Producer
+  # ============================================================================
+  insurance-producer:
+    build:
+      context: ..
+      dockerfile: docker/insurance-producer/Dockerfile
+      target: production
+    container_name: afriflow-insurance-producer
+    depends_on:
+      - kafka
+      - schema-registry
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      KAFKA_SSL_ENABLED: "false"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: json
+    networks:
+      - afriflow-network
+    volumes:
+      - ../afriflow/domains/insurance/ingestion/avro_schemas:/app/afriflow/domains/insurance/ingestion/avro_schemas:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "print('OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================================================
+  # Kafka UI (for development)
+  # ============================================================================
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: afriflow-kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: afriflow
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+    networks:
+      - afriflow-network
+    profiles:
+      - dev
+
+  # ============================================================================
+  # Prometheus (for monitoring)
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: afriflow-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - afriflow-network
+    profiles:
+      - monitoring
+
+  # ============================================================================
+  # Grafana (for dashboards)
+  # ============================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: afriflow-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-kafka-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - afriflow-network
+    profiles:
+      - monitoring
+
+  # ============================================================================
+  # Test Runner (for CI/CD)
+  # ============================================================================
+  test-runner:
+    build:
+      context: ..
+      dockerfile: docker/insurance-producer/Dockerfile
+      target: development
+    container_name: afriflow-test-runner
+    depends_on:
+      - kafka
+      - schema-registry
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      APP_ENV: test
+    volumes:
+      - ../afriflow/tests:/app/afriflow/tests
+      - ../afriflow/domains/insurance/ingestion/avro_schemas:/app/afriflow/domains/insurance/ingestion/avro_schemas:ro
+    command: pytest afriflow/tests/unit/insurance/ -v --tb=short
+    networks:
+      - afriflow-network
+    profiles:
+      - test
+
+networks:
+  afriflow-network:
+    driver: bridge
+
+volumes:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+  prometheus-data:
+  grafana-data:

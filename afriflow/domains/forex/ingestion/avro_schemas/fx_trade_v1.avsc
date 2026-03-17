@@ -1,0 +1,24 @@
+{
+  "type": "record",
+  "name": "FXTrade",
+  "namespace": "com.afriflow.forex.v1",
+  "doc": "FX trade record from Standard Bank treasury system.",
+  "fields": [
+    {"name": "trade_id", "type": "string"},
+    {"name": "client_id", "type": "string"},
+    {"name": "client_golden_id", "type": ["null", "string"], "default": null},
+    {"name": "trade_type", "type": "string", "doc": "spot | forward | swap | option | ndf"},
+    {"name": "currency_pair", "type": "string"},
+    {"name": "direction", "type": "string", "doc": "buy_usd | sell_usd"},
+    {"name": "notional_usd", "type": "double"},
+    {"name": "rate", "type": "double"},
+    {"name": "value_date", "type": "string"},
+    {"name": "maturity_date", "type": ["null", "string"], "default": null},
+    {"name": "is_hedge", "type": "boolean", "default": false},
+    {"name": "underlying_payment_id", "type": ["null", "string"], "default": null},
+    {"name": "country", "type": "string"},
+    {"name": "traded_at", "type": "string"},
+    {"name": "ingested_at", "type": "string"},
+    {"name": "schema_version", "type": "string", "default": "1.0"}
+  ]
+}

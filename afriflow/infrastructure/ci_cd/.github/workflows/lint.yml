@@ -1,0 +1,29 @@
+name: Lint Infrastructure
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'afriflow/infrastructure/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'afriflow/infrastructure/**'
+
+jobs:
+  tflint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: terraform-linters/setup-tflint@v3
+      - name: Run TFLint
+        run: tflint afriflow/infrastructure/terraform
+
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run yamllint
+        run: |
+          pip install yamllint
+          yamllint afriflow/infrastructure/docker-compose.yml afriflow/infrastructure/kubernetes

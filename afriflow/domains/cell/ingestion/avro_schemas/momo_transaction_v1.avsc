@@ -1,0 +1,27 @@
+{
+  "type": "record",
+  "name": "MoMoTransaction",
+  "namespace": "com.afriflow.cell.v1",
+  "doc": "MTN Mobile Money transaction event. MSISDNs pseudonymised with HMAC-SHA256 country key per RICA.",
+  "fields": [
+    {"name": "transaction_id",        "type": "string"},
+    {"name": "transaction_type",      "type": "string",  "doc": "send_money | receive_money | cashout | cashin | merchant_payment | salary_credit"},
+    {"name": "sender_msisdn_psn",     "type": "string",  "doc": "HMAC pseudonym of sender MSISDN. Format: PSN-{CC}-{16hex}"},
+    {"name": "receiver_msisdn_psn",   "type": "string",  "doc": "HMAC pseudonym of receiver MSISDN"},
+    {"name": "corporate_client_id",   "type": ["null","string"], "default": null, "doc": "Set for corporate salary/bulk payments"},
+    {"name": "country",               "type": "string",  "doc": "ISO-2 country of transaction"},
+    {"name": "currency",              "type": "string",  "doc": "ISO-4217 currency"},
+    {"name": "amount_local",          "type": "double",  "doc": "Amount in local currency"},
+    {"name": "amount_usd",            "type": "double",  "doc": "USD equivalent at official rate"},
+    {"name": "fee_local",             "type": "double",  "doc": "Transaction fee in local currency"},
+    {"name": "is_salary_payment",     "type": "boolean", "default": false},
+    {"name": "is_cross_border",       "type": "boolean", "default": false},
+    {"name": "sender_country",        "type": ["null","string"], "default": null, "doc": "For cross-border only"},
+    {"name": "receiver_country",      "type": ["null","string"], "default": null, "doc": "For cross-border only"},
+    {"name": "channel",               "type": "string",  "doc": "ussd | mobile_app | agent | api"},
+    {"name": "agent_id",              "type": ["null","string"], "default": null},
+    {"name": "transaction_timestamp", "type": "string",  "doc": "ISO-8601 transaction datetime (UTC)"},
+    {"name": "ingested_at",           "type": "string"},
+    {"name": "schema_version",        "type": "string",  "default": "1.0"}
+  ]
+}

@@ -1,0 +1,395 @@
+# AfriFlow Docker Compose - Development Environment
+#
+# We provide local development environment with all
+# dependencies: Kafka, Schema Registry, Spark, Flink,
+# and Delta Lake.
+
+version: '3.8'
+
+x-resource-limits: &resource-limits
+  deploy:
+    resources:
+      limits:
+        cpus: '0.50'
+        memory: 512M
+      reservations:
+        cpus: '0.25'
+        memory: 256M
+
+services:
+  # =============================================================================
+  # APACHE KAFKA - Event Streaming Platform
+  # =============================================================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: afriflow-zookeeper
+    <<: *resource-limits
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+    networks:
+      - afriflow-network
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: afriflow-kafka
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - afriflow-network
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.0
+    container_name: afriflow-schema-registry
+    <<: *resource-limits
+    depends_on:
+      - kafka
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: BACKWARD
+    networks:
+      - afriflow-network
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # =============================================================================
+  # APACHE SPARK - Batch Processing
+  # =============================================================================
+  spark-master:
+    image: apache/spark:3.5.0
+    container_name: afriflow-spark-master
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    command: bin/spark-class org.apache.spark.deploy.master.Master
+    environment:
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_PORT: 7088
+      SPARK_MASTER_WEBUI_PORT: 8080
+    volumes:
+      - spark-master-data:/opt/spark/work-dir
+      - ../domains:/opt/spark/app/domains
+      - ../schemas:/opt/spark/app/schemas
+    networks:
+      - afriflow-network
+    ports:
+      - "8080:8080"
+      - "7088:7088"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  spark-worker:
+    image: apache/spark:3.5.0
+    container_name: afriflow-spark-worker
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    depends_on:
+      - spark-master
+    command: bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7088
+    environment:
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_MASTER: spark://spark-master:7088
+    volumes:
+      - spark-worker-data:/opt/spark/work-dir
+      - ../domains:/opt/spark/app/domains
+      - ../schemas:/opt/spark/app/schemas
+    networks:
+      - afriflow-network
+    ports:
+      - "8082:8081"
+
+  # =============================================================================
+  # APACHE FLINK - Stream Processing
+  # =============================================================================
+  flink-jobmanager:
+    image: flink:1.18.0
+    container_name: afriflow-flink-jobmanager
+    <<: *resource-limits
+    command: jobmanager
+    environment:
+      - FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+      - JOB_MANAGER_RPC_PORT=6123
+    volumes:
+      - flink-jobmanager-data:/var/lib/flink
+      - ../domains:/opt/flink/usrlib
+    networks:
+      - afriflow-network
+    ports:
+      - "8083:8081"
+      - "6123:6123"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  flink-taskmanager:
+    image: flink:1.18.0
+    container_name: afriflow-flink-taskmanager
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    depends_on:
+      - flink-jobmanager
+    command: taskmanager
+    environment:
+      - FLINK_PROPERTIES=
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        taskmanager.memory.process.size: 2048m
+    volumes:
+      - flink-taskmanager-data:/var/lib/flink
+      - ../domains:/opt/flink/usrlib
+    networks:
+      - afriflow-network
+    ports:
+      - "8084:8081"
+
+  # =============================================================================
+  # MINIO - S3-Compatible Storage (for local dev)
+  # =============================================================================
+  minio:
+    image: minio/minio:RELEASE.2024-01-01T16-36-33Z
+    container_name: afriflow-minio
+    <<: *resource-limits
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    networks:
+      - afriflow-network
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # =============================================================================
+  # POSTGRESQL - Metadata Store
+  # =============================================================================
+  postgres:
+    image: postgres:15.4
+    container_name: afriflow-postgres
+    <<: *resource-limits
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../schemas/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - afriflow-network
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # =============================================================================
+  # REDIS - Caching Layer
+  # =============================================================================
+  redis:
+    image: redis:7.2-alpine
+    container_name: afriflow-redis
+    <<: *resource-limits
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - afriflow-network
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # =============================================================================
+  # GRAFANA - Monitoring & Visualization
+  # =============================================================================
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: afriflow-grafana
+    <<: *resource-limits
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ../monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - afriflow-network
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  # =============================================================================
+  # PROMETHEUS - Metrics Collection
+  # =============================================================================
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: afriflow-prometheus
+    <<: *resource-limits
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - prometheus-data:/prometheus
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ../monitoring/prometheus/rules.yml:/etc/prometheus/rules.yml
+    networks:
+      - afriflow-network
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # =============================================================================
+  # AIRFLOW - Orchestration
+  # =============================================================================
+  airflow-webserver:
+    image: apache/airflow:2.8.0
+    container_name: afriflow-airflow-webserver
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
+      _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow-providers-apache-spark apache-airflow-providers-apache-kafka
+    volumes:
+      - airflow-dags:/opt/airflow/dags
+      - airflow-logs:/opt/airflow/logs
+      - airflow-plugins:/opt/airflow/plugins
+      - ../orchestration/airflow/dags:/opt/airflow/dags
+      - ../orchestration/airflow/plugins:/opt/airflow/plugins
+    networks:
+      - afriflow-network
+    ports:
+      - "8085:8080"
+    depends_on:
+      - postgres
+      - redis
+
+  airflow-scheduler:
+    image: apache/airflow:2.8.0
+    container_name: afriflow-airflow-scheduler
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    volumes:
+      - airflow-dags:/opt/airflow/dags
+      - airflow-logs:/opt/airflow/logs
+      - airflow-plugins:/opt/airflow/plugins
+      - ../orchestration/airflow/dags:/opt/airflow/dags
+      - ../orchestration/airflow/plugins:/opt/airflow/plugins
+    networks:
+      - afriflow-network
+    depends_on:
+      - airflow-webserver
+
+networks:
+  afriflow-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+  spark-master-data:
+  spark-worker-data:
+  flink-jobmanager-data:
+  flink-taskmanager-data:
+  minio-data:
+  postgres-data:
+  redis-data:
+  grafana-data:
+  prometheus-data:
+  airflow-dags:
+  airflow-logs:
+  airflow-plugins:

@@ -1,0 +1,20 @@
+{
+  "type": "record",
+  "name": "USSDSession",
+  "namespace": "com.afriflow.cell.v1",
+  "doc": "USSD session record. MSISDN pseudonymised per RICA.",
+  "fields": [
+    {"name": "session_id",         "type": "string"},
+    {"name": "msisdn_psn",         "type": "string", "doc": "HMAC pseudonym of MSISDN"},
+    {"name": "country",            "type": "string"},
+    {"name": "ussd_code",          "type": "string", "doc": "USSD short code (e.g. *120*321#)"},
+    {"name": "session_type",       "type": "string", "doc": "airtime_check | momo_transfer | balance | loan_enquiry | menu_navigation"},
+    {"name": "duration_seconds",   "type": "int"},
+    {"name": "steps_taken",        "type": "int",    "doc": "Number of menu steps navigated"},
+    {"name": "completed",          "type": "boolean"},
+    {"name": "amount_usd",         "type": ["null","double"], "default": null, "doc": "For financial transactions"},
+    {"name": "session_timestamp",  "type": "string"},
+    {"name": "ingested_at",        "type": "string"},
+    {"name": "schema_version",     "type": "string", "default": "1.0"}
+  ]
+}

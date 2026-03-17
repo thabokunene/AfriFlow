@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: check-domain-imports
+        name: Check domain import convention
+        entry: python afriflow/scripts/check_imports.py --check --path domains
+        language: system
+        files: ^afriflow/domains/.*\.py$

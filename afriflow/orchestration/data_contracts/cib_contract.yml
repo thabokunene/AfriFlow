@@ -1,0 +1,129 @@
+# orchestration/data_contracts/cib_contract.yml
+#
+# Data contract for the CIB (Corporate Investment
+# Banking) domain.
+#
+# We define the schema, quality thresholds, freshness
+# SLA, and ownership for data produced by the CIB
+# domain and consumed by the integration layer.
+#
+# Disclaimer:
+#   This project is not sanctioned by, affiliated with,
+#   or endorsed by Standard Bank Group, MTN Group, or
+#   any affiliated entity. It is a demonstration of
+#   concept, domain knowledge, and data engineering
+#   skill by Thabo Kunene.
+
+contract:
+  name: "CIB Payments Data Contract"
+  version: "2.0"
+  domain: "cib"
+  owner: "CIB Data Engineering Team"
+  description: >
+    We publish ISO 20022 compliant payment events from
+    the CIB transaction processing system. These events
+    feed the integration layer for entity resolution and
+    cross-domain signal generation.
+
+schema:
+  format: "avro"
+  registry: "schema-registry.afriflow.internal"
+  topic: "cib.payments.raw"
+  fields:
+    - name: "message_id"
+      type: "string"
+      required: true
+      description: "Unique ISO 20022 message identifier"
+    - name: "debtor_client_id"
+      type: "string"
+      required: true
+      description: "CIB internal client identifier"
+    - name: "debtor_name"
+      type: "string"
+      required: true
+      description: "Debtor company name"
+    - name: "debtor_country"
+      type: "string"
+      required: true
+      pattern: "^[A-Z]{2}$"
+      description: "ISO 3166-1 alpha-2 country code"
+    - name: "creditor_name"
+      type: "string"
+      required: true
+    - name: "creditor_country"
+      type: "string"
+      required: true
+      pattern: "^[A-Z]{2}$"
+    - name: "amount"
+      type: "double"
+      required: true
+      minimum: 0.01
+    - name: "currency"
+      type: "string"
+      required: true
+      pattern: "^[A-Z]{3}$"
+    - name: "business_date"
+      type: "string"
+      required: true
+      format: "date"
+    - name: "payment_type"
+      type: "string"
+      required: true
+      enum:
+        - "SUPPLIER"
+        - "PAYROLL"
+        - "INTERCOMPANY"
+        - "TAX"
+        - "DIVIDEND"
+        - "LOAN_REPAYMENT"
+    - name: "registration_number"
+      type: "string"
+      required: false
+      description: "Company registration for entity matching"
+
+quality:
+  completeness:
+    debtor_country: 0.995
+    creditor_country: 0.995
+    amount: 1.0
+    payment_type: 0.99
+    registration_number: 0.80
+  freshness:
+    max_latency_seconds: 300
+    sla_target: "sub-5-minute"
+  volume:
+    minimum_daily_events: 1000
+    maximum_daily_events: 500000
+    alert_on_deviation_pct: 30
+
+consumers:
+  - name: "Entity Resolution Engine"
+    team: "AfriFlow Integration"
+    usage: "Client matching across domains"
+    critical_fields:
+      - "debtor_client_id"
+      - "debtor_name"
+      - "registration_number"
+  - name: "Corridor Intelligence"
+    team: "AfriFlow Integration"
+    usage: "Cross-border payment corridor analysis"
+    critical_fields:
+      - "debtor_country"
+      - "creditor_country"
+      - "amount"
+      - "currency"
+  - name: "Expansion Detector"
+    team: "AfriFlow Cross-Domain Signals"
+    usage: "Geographic expansion detection"
+    critical_fields:
+      - "debtor_client_id"
+      - "creditor_country"
+      - "business_date"
+      - "amount"
+
+evolution:
+  compatibility: "BACKWARD"
+  deprecation_notice_days: 90
+  current_version: "v2"
+  previous_version: "v1"
+  breaking_changes: []

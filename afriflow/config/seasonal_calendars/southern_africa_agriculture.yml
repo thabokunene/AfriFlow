@@ -1,0 +1,77 @@
+# config/seasonal_calendars/southern_africa_agriculture.yml
+
+# Seasonal calendar for Southern African agricultural cycles.
+#
+# DISCLAIMER: This project is not sanctioned by, affiliated with, or
+# endorsed by Standard Bank Group, MTN Group, or any of their subsidiaries.
+
+region: southern_africa
+countries: [ZA, MZ, ZM, ZW, MW, BW]
+
+seasons:
+  maize:
+    planting:
+      start_month: 10
+      end_month: 12
+      cash_flow_impact: negative
+      expected_cib_change_pct: -25
+      expected_fx_demand: USD_buy
+      notes: "Input purchase period. Fertilizer and seed imports peak."
+
+    growing:
+      start_month: 1
+      end_month: 3
+      cash_flow_impact: neutral
+      expected_cib_change_pct: -40
+      expected_fx_demand: minimal
+      notes: "Low activity period. False attrition signals likely."
+
+    harvest:
+      start_month: 4
+      end_month: 6
+      cash_flow_impact: positive
+      expected_cib_change_pct: 60
+      expected_fx_demand: USD_sell
+      notes: "Export revenue peak. FX conversion and hedging demand high."
+
+    marketing:
+      start_month: 7
+      end_month: 9
+      cash_flow_impact: positive_declining
+      expected_cib_change_pct: 20
+      expected_fx_demand: mixed
+      notes: "Stored crop sales. Gradual decline in activity."
+
+  sugar_mozambique:
+    crushing:
+      start_month: 6
+      end_month: 11
+      cash_flow_impact: positive
+      expected_cib_change_pct: 80
+      expected_fx_demand: USD_sell
+      notes: "Sugar export revenue. MZN/USD corridor active."
+
+    off_season:
+      start_month: 12
+      end_month: 5
+      cash_flow_impact: negative
+      expected_cib_change_pct: -50
+      expected_fx_demand: USD_buy
+      notes: "Equipment import and maintenance. Low export revenue."
+
+  tobacco_zimbabwe:
+    auction:
+      start_month: 3
+      end_month: 8
+      cash_flow_impact: positive
+      expected_cib_change_pct: 70
+      expected_fx_demand: USD_sell
+      notes: "Tobacco auction season. Major USD inflow period."
+
+    off_season:
+      start_month: 9
+      end_month: 2
+      cash_flow_impact: negative
+      expected_cib_change_pct: -35
+      expected_fx_demand: USD_buy
+      notes: "Input procurement. Minimal export revenue."

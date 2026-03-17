@@ -1,0 +1,30 @@
+{
+  "type": "record",
+  "name": "CIBPayment",
+  "namespace": "com.afriflow.cib.v1",
+  "doc": "CIB SWIFT MT103 payment event. Version 1.",
+  "fields": [
+    {"name": "payment_id",        "type": "string",  "doc": "Unique payment identifier (UETR)"},
+    {"name": "transaction_ref",   "type": "string",  "doc": "Bank transaction reference"},
+    {"name": "debtor_id",         "type": "string",  "doc": "Debtor golden entity ID"},
+    {"name": "debtor_name",       "type": "string",  "doc": "Debtor legal name"},
+    {"name": "debtor_country",    "type": "string",  "doc": "ISO-2 debtor country"},
+    {"name": "debtor_bic",        "type": ["null","string"], "default": null, "doc": "Debtor BIC/SWIFT"},
+    {"name": "creditor_id",       "type": "string",  "doc": "Creditor entity ID"},
+    {"name": "creditor_name",     "type": "string",  "doc": "Creditor legal name"},
+    {"name": "creditor_country",  "type": "string",  "doc": "ISO-2 creditor country"},
+    {"name": "creditor_bic",      "type": ["null","string"], "default": null},
+    {"name": "amount",            "type": "double",  "doc": "Transaction amount"},
+    {"name": "currency",          "type": "string",  "doc": "ISO-4217 currency code"},
+    {"name": "amount_usd",        "type": "double",  "doc": "Amount converted to USD at mid-rate"},
+    {"name": "value_date",        "type": "string",  "doc": "ISO-8601 value date"},
+    {"name": "transaction_date",  "type": "string",  "doc": "ISO-8601 transaction datetime"},
+    {"name": "purpose_code",      "type": ["null","string"], "default": null, "doc": "ISO 20022 purpose code"},
+    {"name": "remittance_info",   "type": ["null","string"], "default": null},
+    {"name": "swift_message_type","type": "string",  "default": "MT103"},
+    {"name": "is_cross_border",   "type": "boolean"},
+    {"name": "ingested_at",       "type": "string",  "doc": "ISO-8601 ingestion timestamp"},
+    {"name": "source_system",     "type": "string",  "default": "SWIFT_GPI"},
+    {"name": "schema_version",    "type": "string",  "default": "1.0"}
+  ]
+}

@@ -1,0 +1,373 @@
+{
+  "data_asset_type": "batch",
+  "expectation_suite_name": "cib_payments_suite",
+  "expectations": [
+    {
+      "expectation_type": "expect_column_to_exist",
+      "kwargs": {
+        "column": "transaction_id"
+      },
+      "meta": {
+        "description": "Transaction ID column must exist",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "transaction_id"
+      },
+      "meta": {
+        "description": "Transaction ID cannot be null",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_unique",
+      "kwargs": {
+        "column": "transaction_id"
+      },
+      "meta": {
+        "description": "Transaction IDs must be unique",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "transaction_id",
+        "regex": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      },
+      "meta": {
+        "description": "Transaction ID must be valid UUID format",
+        "criticality": "high"
+      }
+    },
+    {
+      "expectation_type": "expect_column_to_exist",
+      "kwargs": {
+        "column": "amount"
+      },
+      "meta": {
+        "description": "Amount column must exist",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "amount"
+      },
+      "meta": {
+        "description": "Amount cannot be null",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "amount",
+        "min_value": 0.01,
+        "max_value": 100000000
+      },
+      "meta": {
+        "description": "Amount must be positive and within reasonable bounds",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_to_exist",
+      "kwargs": {
+        "column": "currency"
+      },
+      "meta": {
+        "description": "Currency column must exist",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "currency"
+      },
+      "meta": {
+        "description": "Currency cannot be null",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "currency",
+        "regex": "^[A-Z]{3}$"
+      },
+      "meta": {
+        "description": "Currency must be valid ISO 4217 format",
+        "criticality": "high"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_in_set",
+      "kwargs": {
+        "column": "currency",
+        "value_set": ["USD", "EUR", "ZAR", "NGN", "KES", "GHS", "GBP", "CNY", "AED"]
+      },
+      "meta": {
+        "description": "Currency must be from approved list",
+        "criticality": "high"
+      }
+    },
+    {
+      "expectation_type": "expect_column_to_exist",
+      "kwargs": {
+        "column": "sender_country"
+      },
+      "meta": {
+        "description": "Sender country column must exist",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "sender_country"
+      },
+      "meta": {
+        "description": "Sender country cannot be null",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "sender_country",
+        "regex": "^[A-Z]{2}$"
+      },
+      "meta": {
+        "description": "Sender country must be valid ISO 3166-1 alpha-2",
+        "criticality": "high"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_in_set",
+      "kwargs": {
+        "column": "sender_country",
+        "value_set": ["ZA", "NG", "KE", "GH", "CI", "TZ", "UG", "ZM", "ZW", "MZ", "AO", "RW", "ET", "CM", "MA", "EG"]
+      },
+      "meta": {
+        "description": "Sender country must be African market",
+        "criticality": "high"
+      }
+    },
+    {
+      "expectation_type": "expect_column_to_exist",
+      "kwargs": {
+        "column": "beneficiary_country"
+      },
+      "meta": {
+        "description": "Beneficiary country column must exist",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "beneficiary_country"
+      },
+      "meta": {
+        "description": "Beneficiary country cannot be null",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "beneficiary_country",
+        "regex": "^[A-Z]{2}$"
+      },
+      "meta": {
+        "description": "Beneficiary country must be valid ISO 3166-1 alpha-2",
+        "criticality": "high"
+      }
+    },
+    {
+      "expectation_type": "expect_column_to_exist",
+      "kwargs": {
+        "column": "status"
+      },
+      "meta": {
+        "description": "Status column must exist",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "status"
+      },
+      "meta": {
+        "description": "Status cannot be null",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_in_set",
+      "kwargs": {
+        "column": "status",
+        "value_set": ["COMPLETED", "PENDING", "FAILED"]
+      },
+      "meta": {
+        "description": "Status must be valid payment status",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_in_set",
+      "kwargs": {
+        "column": "purpose_code",
+        "value_set": ["CORT", "INTC", "DIVI", "SALA", "TREA"]
+      },
+      "meta": {
+        "description": "Purpose code must be valid ISO 20022 code",
+        "criticality": "medium"
+      }
+    },
+    {
+      "expectation_type": "expect_column_to_exist",
+      "kwargs": {
+        "column": "corridor"
+      },
+      "meta": {
+        "description": "Corridor column must exist",
+        "criticality": "high"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "corridor",
+        "regex": "^[A-Z]{2}-[A-Z]{2}$"
+      },
+      "meta": {
+        "description": "Corridor must be valid format (XX-YY)",
+        "criticality": "high"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "timestamp"
+      },
+      "meta": {
+        "description": "Timestamp cannot be null",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "sender_name"
+      },
+      "meta": {
+        "description": "Sender name cannot be null",
+        "criticality": "high"
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "beneficiary_name"
+      },
+      "meta": {
+        "description": "Beneficiary name cannot be null",
+        "criticality": "high"
+      }
+    },
+    {
+      "expectation_type": "expect_column_mean_to_be_between",
+      "kwargs": {
+        "column": "amount",
+        "min_value": 1000,
+        "max_value": 10000000
+      },
+      "meta": {
+        "description": "Average payment amount should be within expected range",
+        "criticality": "medium"
+      }
+    },
+    {
+      "expectation_type": "expect_column_proportion_of_unique_values_to_be_between",
+      "kwargs": {
+        "column": "transaction_id",
+        "min_value": 0.99,
+        "max_value": 1.0
+      },
+      "meta": {
+        "description": "Transaction IDs should be almost entirely unique",
+        "criticality": "critical"
+      }
+    },
+    {
+      "expectation_type": "expect_column_value_lengths_to_be_between",
+      "kwargs": {
+        "column": "sender_name",
+        "min_value": 2,
+        "max_value": 200
+      },
+      "meta": {
+        "description": "Sender name length should be reasonable",
+        "criticality": "low"
+      }
+    },
+    {
+      "expectation_type": "expect_column_value_lengths_to_be_between",
+      "kwargs": {
+        "column": "beneficiary_name",
+        "min_value": 2,
+        "max_value": 200
+      },
+      "meta": {
+        "description": "Beneficiary name length should be reasonable",
+        "criticality": "low"
+      }
+    },
+    {
+      "expectation_type": "expect_column_max_to_be_between",
+      "kwargs": {
+        "column": "amount",
+        "max_value": 50000000
+      },
+      "meta": {
+        "description": "Maximum payment amount should not exceed threshold",
+        "criticality": "high"
+      }
+    },
+    {
+      "expectation_type": "expect_column_stdev_to_be_between",
+      "kwargs": {
+        "column": "amount",
+        "min_value": 100,
+        "max_value": 5000000
+      },
+      "meta": {
+        "description": "Payment amount standard deviation should be within bounds",
+        "criticality": "low"
+      }
+    }
+  ],
+  "meta": {
+    "Great Expectations version": "0.18.0",
+    "created_at": "2026-03-17T00:00:00Z",
+    "cib_domain": {
+      "description": "CIB Payments Data Quality Expectations",
+      "owner": "CIB Data Engineering Team",
+      "criticality_levels": {
+        "critical": "Must pass for data to be usable",
+        "high": "Should pass, investigate failures promptly",
+        "medium": "Monitor for trends",
+        "low": "Informational"
+      }
+    },
+    "data_contract_reference": "orchestration/data_contracts/cib_contract.yml"
+  }
+}

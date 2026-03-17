@@ -1,0 +1,31 @@
+name: Test Infrastructure
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'afriflow/infrastructure/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'afriflow/infrastructure/**'
+
+jobs:
+  terraform-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: hashicorp/setup-terraform@v2
+      - name: Terraform Init
+        run: terraform -chdir=afriflow/infrastructure/terraform init -backend=false
+      - name: Terraform Validate
+        run: terraform -chdir=afriflow/infrastructure/terraform validate
+
+  docker-compose-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Docker Compose Config
+        run: |
+          cd afriflow/infrastructure
+          docker-compose config -q

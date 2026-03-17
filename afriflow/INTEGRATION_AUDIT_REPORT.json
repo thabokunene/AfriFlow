@@ -1,0 +1,203 @@
+{
+  "audit_metadata": {
+    "audit_date": "2026-03-17T12:32:20Z",
+    "auditor": "Kilo Code",
+    "project": "AfriFlow Integration Folder Audit",
+    "scope": "domains/*/ingestion/*, domains/*/processing/*"
+  },
+  "directory_tree": [
+    {
+      "path": "domains/cib/ingestion/",
+      "type": "directory",
+      "purpose": "CIB payment ingestion via Kafka"
+    },
+    {
+      "path": "domains/cib/ingestion/kafka_producer.py",
+      "type": "file",
+      "size_bytes": 8114,
+      "purpose": "Produce CIB payment events to Kafka",
+      "status": "implemented"
+    },
+    {
+      "path": "domains/cib/ingestion/avro_schemas/",
+      "type": "directory",
+      "purpose": "Avro schema definitions for CIB"
+    },
+    {
+      "path": "domains/cell/ingestion/",
+      "type": "directory",
+      "purpose": "Cell/MoMo data ingestion"
+    },
+    {
+      "path": "domains/cell/ingestion/kafka_producer.py",
+      "type": "file",
+      "size_bytes": 0,
+      "purpose": "Produce cell events to Kafka",
+      "status": "missing"
+    },
+    {
+      "path": "domains/cell/ingestion/batch_sftp_ingester.py",
+      "type": "file",
+      "size_bytes": 0,
+      "purpose": "Batch SFTP ingestion",
+      "status": "missing"
+    },
+    {
+      "path": "domains/cell/ingestion/monthly_report_ingester.py",
+      "type": "file",
+      "size_bytes": 0,
+      "purpose": "Monthly report ingestion",
+      "status": "missing"
+    },
+    {
+      "path": "domains/forex/ingestion/",
+      "type": "directory",
+      "purpose": "Forex trading data ingestion"
+    },
+    {
+      "path": "domains/forex/ingestion/kafka_producer.py",
+      "type": "file",
+      "size_bytes": 15469,
+      "purpose": "Produce FX trade/rate events to Kafka",
+      "status": "implemented"
+    },
+    {
+      "path": "domains/insurance/ingestion/",
+      "type": "directory",
+      "purpose": "Insurance data ingestion"
+    },
+    {
+      "path": "domains/insurance/ingestion/kafka_producer.py",
+      "type": "file",
+      "size_bytes": 0,
+      "purpose": "Produce insurance events to Kafka",
+      "status": "missing"
+    },
+    {
+      "path": "domains/pbb/ingestion/",
+      "type": "directory",
+      "purpose": "PBB/Payroll data ingestion"
+    },
+    {
+      "path": "domains/pbb/ingestion/kafka_producer.py",
+      "type": "file",
+      "size_bytes": 0,
+      "purpose": "Produce payroll events to Kafka",
+      "status": "missing"
+    },
+    {
+      "path": "domains/cib/processing/",
+      "type": "directory",
+      "purpose": "CIB data processing (Flink/Spark)"
+    },
+    {
+      "path": "domains/cib/processing/flink/",
+      "type": "directory",
+      "purpose": "Flink streaming processors"
+    },
+    {
+      "path": "domains/cib/processing/spark/",
+      "type": "directory",
+      "purpose": "Spark batch processors"
+    }
+  ],
+  "issues": [
+    {
+      "file_path": "domains/cell/ingestion/kafka_producer.py",
+      "line_number": null,
+      "severity": "critical",
+      "category": "missing_implementation",
+      "description": "File is empty (0 bytes) - required Kafka producer for cell domain",
+      "remediation": "Implement Kafka producer following forex/ingestion/kafka_producer.py pattern"
+    },
+    {
+      "file_path": "domains/cell/ingestion/batch_sftp_ingester.py",
+      "line_number": null,
+      "severity": "major",
+      "category": "missing_implementation",
+      "description": "File is empty (0 bytes) - required for batch SFTP ingestion",
+      "remediation": "Implement SFTP batch ingestion module"
+    },
+    {
+      "file_path": "domains/cell/ingestion/monthly_report_ingester.py",
+      "line_number": null,
+      "severity": "major",
+      "category": "missing_implementation",
+      "description": "File is empty (0 bytes) - required for monthly report ingestion",
+      "remediation": "Implement monthly report ingestion module"
+    },
+    {
+      "file_path": "domains/insurance/ingestion/kafka_producer.py",
+      "line_number": null,
+      "severity": "critical",
+      "category": "missing_implementation",
+      "description": "File is empty (0 bytes) - required Kafka producer for insurance domain",
+      "remediation": "Implement Kafka producer following cib/ingestion/kafka_producer.py pattern"
+    },
+    {
+      "file_path": "domains/pbb/ingestion/kafka_producer.py",
+      "line_number": null,
+      "severity": "critical",
+      "category": "missing_implementation",
+      "description": "File is empty (0 bytes) - required Kafka producer for pbb domain",
+      "remediation": "Implement Kafka producer following cib/ingestion/kafka_producer.py pattern"
+    },
+    {
+      "file_path": "domains/cell/processing/flink/expansion_detector.py",
+      "line_number": "241",
+      "severity": "minor",
+      "category": "code_quality",
+      "description": "Module level import not at top of file",
+      "remediation": "Move all imports to the top of the file"
+    },
+    {
+      "file_path": "domains/test_domains.py",
+      "line_number": "176",
+      "severity": "major",
+      "category": "test_coverage",
+      "description": "Fixed indentation errors that prevented test execution",
+      "remediation": "Tests now execute correctly"
+    },
+    {
+      "file_path": "pyproject.toml",
+      "line_number": "45",
+      "severity": "major",
+      "category": "test_coverage",
+      "description": "Coverage configured for wrong module path (afriflow.domains.forex.simulator vs domains/test_domains.py)",
+      "remediation": "Update pytest coverage config to: --cov=domains --cov-report=term-missing"
+    },
+    {
+      "file_path": "domains/cell/processing/flink/expansion_detector.py",
+      "line_number": "96,126,156",
+      "severity": "minor",
+      "category": "deprecation",
+      "description": "datetime.utcnow() is deprecated - use datetime.now(datetime.UTC)",
+      "remediation": "Replace datetime.utcnow() with datetime.now(timezone.utc)"
+    },
+    {
+      "file_path": "domains/cib/ingestion/kafka_producer.py",
+      "line_number": null,
+      "severity": "minor",
+      "category": "test_coverage",
+      "description": "No unit tests for Kafka producer",
+      "remediation": "Add unit tests covering validation, send, batch operations"
+    },
+    {
+      "file_path": "domains/forex/ingestion/kafka_producer.py",
+      "line_number": null,
+      "severity": "minor",
+      "category": "test_coverage",
+      "description": "No unit tests for Forex Kafka producer",
+      "remediation": "Add unit tests for trade, rate_tick, hedge validation and sending"
+    }
+  ],
+  "summary": {
+    "total_files": 18,
+    "files_implemented": 5,
+    "files_missing": 5,
+    "files_stub": 8,
+    "critical_issues": 3,
+    "major_issues": 5,
+    "minor_issues": 3
+  }
+}

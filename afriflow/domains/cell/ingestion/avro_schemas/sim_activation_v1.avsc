@@ -1,0 +1,22 @@
+{
+  "type": "record",
+  "name": "SIMActivation",
+  "namespace": "com.afriflow.cell.v1",
+  "doc": "Corporate SIM activation batch record. Individual MSISDNs stripped per RICA — only aggregate counts flow to hub.",
+  "fields": [
+    {"name": "activation_id",        "type": "string"},
+    {"name": "corporate_client_id",  "type": "string",  "doc": "MTN corporate account ID"},
+    {"name": "country",              "type": "string"},
+    {"name": "sim_count",            "type": "int",     "doc": "Number of SIMs activated in this batch"},
+    {"name": "activation_type",      "type": "string",  "doc": "new_enterprise | sme_starter | expansion_batch | replacement"},
+    {"name": "department_breakdown", "type": {"type": "map", "values": "int"}, "doc": "department → SIM count"},
+    {"name": "location_city",        "type": ["null","string"], "default": null},
+    {"name": "location_region",      "type": ["null","string"], "default": null},
+    {"name": "price_plan",           "type": "string"},
+    {"name": "account_manager_id",   "type": ["null","string"], "default": null},
+    {"name": "contains_msisdns",     "type": "boolean", "default": false, "doc": "If true, strip before export per RICA"},
+    {"name": "activated_at",         "type": "string"},
+    {"name": "ingested_at",          "type": "string"},
+    {"name": "schema_version",       "type": "string", "default": "1.0"}
+  ]
+}

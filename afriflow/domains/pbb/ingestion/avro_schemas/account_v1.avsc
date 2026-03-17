@@ -1,0 +1,25 @@
+{
+  "type": "record",
+  "name": "PBBAccount",
+  "namespace": "com.afriflow.pbb.v1",
+  "doc": "Personal and Business Banking account record.",
+  "fields": [
+    {"name": "account_id", "type": "string"},
+    {"name": "client_id", "type": "string"},
+    {"name": "client_golden_id", "type": ["null", "string"], "default": null},
+    {"name": "account_type", "type": "string", "doc": "entry | savings | current | business | private | youth"},
+    {"name": "status", "type": "string", "doc": "active | dormant | restricted | closed"},
+    {"name": "country", "type": "string"},
+    {"name": "currency", "type": "string"},
+    {"name": "opening_date", "type": "string"},
+    {"name": "average_balance", "type": "double"},
+    {"name": "digital_channels", "type": {"type": "array", "items": "string"}},
+    {"name": "linked_products", "type": {"type": "array", "items": "string"}},
+    {"name": "is_salary_account", "type": "boolean", "default": false},
+    {"name": "employer_id", "type": ["null", "string"], "default": null},
+    {"name": "kyc_tier", "type": "int", "doc": "1=basic (FICA Tier 1), 2=full KYC, 3=enhanced due diligence"},
+    {"name": "last_transaction_date", "type": ["null", "string"], "default": null},
+    {"name": "ingested_at", "type": "string"},
+    {"name": "schema_version", "type": "string", "default": "1.0"}
+  ]
+}

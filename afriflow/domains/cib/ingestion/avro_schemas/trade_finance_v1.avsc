@@ -1,0 +1,28 @@
+{
+  "type": "record",
+  "name": "TradeFinanceRecord",
+  "namespace": "com.afriflow.cib.v1",
+  "doc": "CIB trade finance instrument (LC, bank guarantee, documentary collection).",
+  "fields": [
+    {"name": "tf_id",                "type": "string",  "doc": "Trade finance instrument ID"},
+    {"name": "record_type",          "type": "string",  "doc": "letter_of_credit | bank_guarantee | doc_collection"},
+    {"name": "applicant_id",         "type": "string"},
+    {"name": "applicant_name",       "type": "string"},
+    {"name": "applicant_country",    "type": "string"},
+    {"name": "beneficiary_id",       "type": "string"},
+    {"name": "beneficiary_name",     "type": "string"},
+    {"name": "beneficiary_country",  "type": "string"},
+    {"name": "currency",             "type": "string"},
+    {"name": "amount",               "type": "double"},
+    {"name": "amount_usd",           "type": "double"},
+    {"name": "commodity",            "type": ["null","string"], "default": null, "doc": "e.g. crude_oil, cocoa, copper"},
+    {"name": "issue_date",           "type": "string"},
+    {"name": "expiry_date",          "type": "string"},
+    {"name": "status",               "type": "string", "doc": "issued | utilized | expired | cancelled"},
+    {"name": "port_of_loading",      "type": ["null","string"], "default": null},
+    {"name": "port_of_discharge",    "type": ["null","string"], "default": null},
+    {"name": "incoterms",            "type": ["null","string"], "default": null},
+    {"name": "ingested_at",          "type": "string"},
+    {"name": "schema_version",       "type": "string", "default": "1.0"}
+  ]
+}

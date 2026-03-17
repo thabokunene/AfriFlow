@@ -1,0 +1,575 @@
+# AfriFlow Spark Operator
+#
+# We deploy the Spark on Kubernetes operator for batch
+# processing workloads. This enables dynamic Spark
+# application deployment with resource isolation.
+#
+# DISCLAIMER: This project is not a sanctioned initiative
+# of Standard Bank Group, MTN, or any affiliated entity.
+# It is a demonstration of concept, domain knowledge,
+# and data engineering skill by Thabo Kunene.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: afriflow
+  labels:
+    name: afriflow
+    app.kubernetes.io/name: afriflow
+
+---
+# Service Account for Spark Operator
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spark-operator
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+    app.kubernetes.io/component: operator
+
+---
+# Service Account for Spark Applications
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spark-application
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+    app.kubernetes.io/component: application
+
+---
+# RBAC Role for Spark Operator
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spark-operator-role
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "secrets", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["sparkoperator.k8s.io"]
+    resources: ["sparkapplications", "sparkapplications/status", "scheduledsparkapplications", "scheduledsparkapplications/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+# RBAC ClusterRole for Spark Operator (node access)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spark-operator-cluster-role
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+
+---
+# RBAC RoleBinding for Spark Operator
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spark-operator-role-binding
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+subjects:
+  - kind: ServiceAccount
+    name: spark-operator
+    namespace: afriflow
+roleRef:
+  kind: Role
+  name: spark-operator-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# RBAC ClusterRoleBinding for Spark Operator
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spark-operator-cluster-role-binding
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+subjects:
+  - kind: ServiceAccount
+    name: spark-operator
+    namespace: afriflow
+roleRef:
+  kind: ClusterRole
+  name: spark-operator-cluster-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Spark Operator Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-operator
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+    app.kubernetes.io/component: operator
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "10254"
+    prometheus.io/path: "/metrics"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-operator
+      app.kubernetes.io/name: spark-operator
+      app.kubernetes.io/component: operator
+  template:
+    metadata:
+      labels:
+        app: spark-operator
+        app.kubernetes.io/name: spark-operator
+        app.kubernetes.io/component: operator
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "10254"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: spark-operator
+      securityContext:
+        fsGroup: 185
+        runAsUser: 185
+        runAsGroup: 185
+      containers:
+        - name: spark-operator
+          image: docker.io/kubeflow/spark-operator:v1beta2-1.5.0-3.3.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - -v=2
+            - -logtostderr
+            - -enable-batch-scheduler=false
+            - -enable-webhook=true
+            - -enable-metrics=true
+            - -metrics-port=10254
+            - -metrics-endpoint=/metrics
+            - -namespaces=afriflow
+            - -leader-election=true
+            - -leader-election-lock-name=spark-operator-lock
+            - -leader-election-lock-namespace=afriflow
+            - -ingress-url-format={{.IngressName}}.{{.Namespace}}.svc.cluster.local
+            - -spark-job-namespaces=afriflow
+          ports:
+            - name: metrics
+              containerPort: 10254
+              protocol: TCP
+          env:
+            - name: SPARK_OPERATOR_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: SPARK_APPLICATION_WEBHOOK_ENABLE
+              value: "true"
+            - name: SPARK_APPLICATION_WEBHOOK_PORT
+              value: "8080"
+            - name: SPARK_APPLICATION_WEBHOOK_SECRET_NAME
+              value: spark-webhook-certs
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 10254
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 10254
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: webhook-certs
+              mountPath: /etc/webhook-certs
+              readOnly: true
+      
+      volumes:
+        - name: webhook-certs
+          secret:
+            secretName: spark-webhook-certs
+            defaultMode: 0644
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: spark-operator
+                    app.kubernetes.io/name: spark-operator
+                topologyKey: kubernetes.io/hostname
+      
+      nodeSelector:
+        afriflow/node-type: central-hub
+      
+      tolerations:
+        - key: "workload"
+          operator: "Equal"
+          value: "batch"
+          effect: "NoSchedule"
+      
+      terminationGracePeriodSeconds: 60
+
+---
+# Spark Operator Service (for webhook)
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-operator-webhook
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+    app.kubernetes.io/component: webhook
+spec:
+  type: ClusterIP
+  ports:
+    - name: webhook
+      port: 443
+      targetPort: 8080
+      protocol: TCP
+  selector:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+    app.kubernetes.io/component: operator
+
+---
+# Certificate for Webhook (using cert-manager)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: spark-webhook-cert
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+spec:
+  dnsNames:
+    - spark-operator-webhook.afriflow.svc
+    - spark-operator-webhook.afriflow.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: spark-selfsigned-issuer
+  secretName: spark-webhook-certs
+
+---
+# Self-signed Issuer for Webhook Certificate
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: spark-selfsigned-issuer
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+spec:
+  selfSigned: {}
+
+---
+# MutatingWebhookConfiguration for Spark Applications
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: spark-operator-webhook
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+webhooks:
+  - name: mutate-sparkoperator-k8s-io-v1beta2-sparkapplication
+    admissionReviewVersions: ["v1", "v1beta1"]
+    sideEffects: None
+    timeoutSeconds: 10
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: spark-operator-webhook
+        namespace: afriflow
+        path: /mutate-sparkoperator-k8s-io-v1beta2-sparkapplication
+      caBundle: ""
+    rules:
+      - apiGroups: ["sparkoperator.k8s.io"]
+        apiVersions: ["v1beta2"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["sparkapplications"]
+    namespaceSelector:
+      matchLabels:
+        name: afriflow
+
+---
+# ValidatingWebhookConfiguration for Spark Applications
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: spark-operator-webhook
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+webhooks:
+  - name: validate-sparkoperator-k8s-io-v1beta2-sparkapplication
+    admissionReviewVersions: ["v1", "v1beta1"]
+    sideEffects: None
+    timeoutSeconds: 10
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: spark-operator-webhook
+        namespace: afriflow
+        path: /validate-sparkoperator-k8s-io-v1beta2-sparkapplication
+      caBundle: ""
+    rules:
+      - apiGroups: ["sparkoperator.k8s.io"]
+        apiVersions: ["v1beta2"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["sparkapplications"]
+    namespaceSelector:
+      matchLabels:
+        name: afriflow
+
+---
+# Default SparkApplication CRD Template
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: spark-py-template
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+    app.kubernetes.io/component: template
+spec:
+  type: Python
+  mode: cluster
+  image: apache/spark:3.5.0-python3.9
+  imagePullPolicy: IfNotPresent
+  mainApplicationFile: local:///opt/spark/examples/src/main/python/pi.py
+  sparkVersion: "3.5.0"
+  restartPolicy:
+    type: OnFailure
+    onFailureRetries: 3
+    onFailureRetryInterval: 10
+    onSubmissionFailureRetries: 3
+    onSubmissionFailureRetryInterval: 10
+  driver:
+    cores: 1
+    coreLimit: "1200m"
+    memory: "2048m"
+    labels:
+      version: 3.5.0
+    serviceAccount: spark-application
+    env:
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef:
+            name: spark-aws-credentials
+            key: AWS_ACCESS_KEY_ID
+            optional: true
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: spark-aws-credentials
+            key: AWS_SECRET_ACCESS_KEY
+            optional: true
+    volumeMounts:
+      - name: spark-config
+        mountPath: /opt/spark/conf
+      - name: spark-secrets
+        mountPath: /etc/spark-secrets
+        readOnly: true
+  executor:
+    cores: 2
+    instances: 2
+    memory: "4096m"
+    labels:
+      version: 3.5.0
+    env:
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef:
+            name: spark-aws-credentials
+            key: AWS_ACCESS_KEY_ID
+            optional: true
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: spark-aws-credentials
+            key: AWS_SECRET_ACCESS_KEY
+            optional: true
+    volumeMounts:
+      - name: spark-config
+        mountPath: /opt/spark/conf
+      - name: spark-secrets
+        mountPath: /etc/spark-secrets
+        readOnly: true
+  dynamicAllocation:
+    enabled: true
+    initialExecutors: 2
+    minExecutors: 1
+    maxExecutors: 10
+  volumes:
+    - name: spark-config
+      configMap:
+        name: spark-default-config
+    - name: spark-secrets
+      secret:
+        secretName: spark-aws-credentials
+        optional: true
+  monitoring:
+    exposeDriverMetrics: true
+    exposeExecutorMetrics: true
+    prometheus:
+      jmxExporterJar: "/prometheus/jmx_exporter.jar"
+      port: 8090
+      portName: metrics
+      protocol: HTTP
+
+---
+# ConfigMap for Spark Default Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spark-default-config
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+data:
+  spark-defaults.conf: |
+    # Spark Configuration
+    spark.eventLog.enabled=true
+    spark.eventLog.dir=s3a://afriflow-spark-logs/
+    spark.history.fs.logDirectory=s3a://afriflow-spark-logs/
+    spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem
+    spark.hadoop.fs.s3a.aws.credentials.provider=com.amazonaws.auth.WebIdentityTokenCredentialProvider
+    spark.kubernetes.driver.pod.name={{.SparkApplicationName}}-driver
+    spark.kubernetes.executor.pod.name={{.SparkApplicationName}}-{{.ExecutorID}}-exec
+    spark.kubernetes.container.image.pullPolicy=IfNotPresent
+    spark.kubernetes.authenticate.driver.serviceAccountName=spark-application
+    spark.kubernetes.authenticate.executor.serviceAccountName=spark-application
+    spark.sql.adaptive.enabled=true
+    spark.sql.adaptive.coalescePartitions.enabled=true
+    spark.sql.adaptive.skewJoin.enabled=true
+
+---
+# Secret for AWS/S3 Credentials (Template - to be populated)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: spark-aws-credentials
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: "placeholder"
+  AWS_SECRET_ACCESS_KEY: "placeholder"
+  AWS_DEFAULT_REGION: "af-south-1"
+
+---
+# PersistentVolumeClaim for Spark Logs
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: spark-logs-pvc
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: gp3-ssd
+  resources:
+    requests:
+      storage: 100Gi
+
+---
+# PodDisruptionBudget for Spark Operator
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: spark-operator-pdb
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: spark-operator
+      app.kubernetes.io/name: spark-operator
+      app.kubernetes.io/component: operator
+
+---
+# Prometheus ServiceMonitor for Spark Operator
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: spark-operator-monitor
+  namespace: afriflow
+  labels:
+    app: spark-operator
+    app.kubernetes.io/name: spark-operator
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: spark-operator
+      app.kubernetes.io/name: spark-operator
+  namespaceSelector:
+    matchNames:
+      - afriflow
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

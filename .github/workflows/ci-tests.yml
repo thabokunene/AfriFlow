@@ -1,0 +1,147 @@
+name: CI - Run Pytest (Matrix)
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - "**"
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.9', '3.10', '3.11']
+        dep-set: ['dev', 'min']
+        include:
+          - os: ubuntu-latest
+            python-version: '3.11'
+            dep-set: 'dev'
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix['python-version'] }}
+
+      - name: Locate pip cache
+        id: pip-cache
+        shell: python
+        run: |
+          import os
+          try:
+              from pip._internal.utils.appdirs import user_cache_dir
+              cache_dir = user_cache_dir()
+          except Exception:
+              from pathlib import Path
+              cache_dir = str(Path.home() / '.cache' / 'pip')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write(f"dir={cache_dir}\n")
+
+      - name: Cache pip
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-pip-${{ matrix['python-version'] }}-${{ matrix['dep-set'] }}-${{ hashFiles('afriflow/pyproject.toml', 'afriflow/requirements-dev.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix['python-version'] }}-${{ matrix['dep-set'] }}-
+            ${{ runner.os }}-pip-${{ matrix['python-version'] }}-
+            ${{ runner.os }}-pip-
+
+      - name: Report cache status
+        run: echo "cache-hit=${{ steps.cache.outputs.cache-hit }}"
+
+      - name: Install dependencies (dev)
+        if: matrix['dep-set'] == 'dev'
+        working-directory: afriflow
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pytest-cov coverage
+
+      - name: Install dependencies (minimal)
+        if: matrix['dep-set'] == 'min'
+        working-directory: afriflow
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "."
+          pip install pytest pytest-cov coverage
+
+      - name: Run tests with coverage
+        working-directory: afriflow
+        run: python -m pytest -q --cov=domains --cov=afriflow --cov-branch --cov-report=term-missing --cov-report=xml --cov-report=html --cov-fail-under=80
+
+      - name: Generate coverage JSON
+        working-directory: afriflow
+        run: python -m coverage json -o coverage.json
+
+      - name: Cell per-module coverage breakdown (line + branch + functions)
+        shell: bash
+        working-directory: afriflow
+        run: |
+          python scripts/cell_coverage_report.py \
+            --xml coverage.xml \
+            --json coverage.json \
+            --include-subpath domains/cell/ingestion \
+            --line-min 90 \
+            --branch-min 90 \
+            --func-min 90 \
+            --write-md coverage/cell_ingestion_coverage.md \
+            --write-json coverage/cell_ingestion_coverage_summary.json \
+            --github-summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.os }}-py${{ matrix['python-version'] }}-${{ matrix['dep-set'] }}
+          path: |
+            afriflow/coverage.xml
+            afriflow/coverage.json
+            afriflow/htmlcov
+            afriflow/coverage/cell_ingestion_coverage.md
+            afriflow/coverage/cell_ingestion_coverage_summary.json
+
+      - name: Enforce per-file coverage gate (>=90%)
+        working-directory: afriflow
+        run: python scripts/coverage_gate.py --report coverage.xml --min 80 --include-subpath domains
+
+      - name: Enforce import convention (domains)
+        working-directory: afriflow
+        run: python scripts/check_imports.py --check --path domains
+
+  quality:
+    name: Quality Gates (lint + typecheck)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies (dev)
+        working-directory: afriflow
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint (black, isort, flake8)
+        working-directory: afriflow
+        run: |
+          black --check .
+          isort --check-only .
+          flake8 .
+
+      - name: Type check (mypy)
+        working-directory: afriflow
+        run: mypy .

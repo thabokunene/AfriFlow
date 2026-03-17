@@ -1,0 +1,136 @@
+# config/sim_deflation_factors.yml
+
+# SIM to Employee deflation factors by country and sector.
+#
+# DISCLAIMER: This project is not sanctioned by, affiliated with, or
+# endorsed by Standard Bank Group, MTN Group, or any of their subsidiaries.
+
+country_factors:
+  ZA:
+    deflation_factor: 0.73
+    confidence: high
+    avg_sims_per_person: 1.3
+    last_calibrated: "2024-03-01"
+    calibration_source: "PBB payroll cross reference, 847 clients"
+
+  NG:
+    deflation_factor: 0.31
+    confidence: medium
+    avg_sims_per_person: 2.8
+    last_calibrated: "2024-02-15"
+    calibration_source: "PBB payroll cross reference, 234 clients"
+
+  KE:
+    deflation_factor: 0.43
+    confidence: high
+    avg_sims_per_person: 2.1
+    last_calibrated: "2024-03-01"
+    calibration_source: "PBB payroll cross reference, 412 clients"
+
+  GH:
+    deflation_factor: 0.46
+    confidence: medium
+    avg_sims_per_person: 1.9
+    last_calibrated: "2024-01-20"
+    calibration_source: "PBB payroll cross reference, 156 clients"
+
+  TZ:
+    deflation_factor: 0.39
+    confidence: medium
+    avg_sims_per_person: 2.4
+    last_calibrated: "2024-01-15"
+    calibration_source: "Estimated from regional benchmarks"
+
+  UG:
+    deflation_factor: 0.41
+    confidence: medium
+    avg_sims_per_person: 2.2
+    last_calibrated: "2024-01-15"
+    calibration_source: "Estimated from regional benchmarks"
+
+  CD:
+    deflation_factor: 0.42
+    confidence: low
+    avg_sims_per_person: 1.9
+    last_calibrated: "2023-12-01"
+    calibration_source: "Estimated. Limited PBB overlap."
+
+  MZ:
+    deflation_factor: 0.50
+    confidence: medium
+    avg_sims_per_person: 1.7
+    last_calibrated: "2024-02-01"
+    calibration_source: "PBB payroll cross reference, 89 clients"
+
+  ZM:
+    deflation_factor: 0.57
+    confidence: medium
+    avg_sims_per_person: 1.6
+    last_calibrated: "2024-02-01"
+    calibration_source: "PBB payroll cross reference, 112 clients"
+
+  AO:
+    deflation_factor: 0.61
+    confidence: low
+    avg_sims_per_person: 1.5
+    last_calibrated: "2023-11-01"
+    calibration_source: "Estimated. Very limited PBB data."
+
+  CI:
+    deflation_factor: 0.44
+    confidence: low
+    avg_sims_per_person: 2.0
+    last_calibrated: "2023-12-01"
+    calibration_source: "Estimated from CFA zone benchmarks."
+
+  BW:
+    deflation_factor: 0.68
+    confidence: high
+    avg_sims_per_person: 1.4
+    last_calibrated: "2024-03-01"
+    calibration_source: "PBB payroll cross reference, 198 clients"
+
+  NA:
+    deflation_factor: 0.73
+    confidence: high
+    avg_sims_per_person: 1.3
+    last_calibrated: "2024-03-01"
+    calibration_source: "PBB payroll cross reference, 167 clients"
+
+sector_adjustments:
+  MIN_GOLD:
+    factor: 0.8
+    rationale: "Remote sites. Company issued SIMs dominate."
+  MIN_COPPER:
+    factor: 0.8
+    rationale: "Similar to gold mining."
+  MIN_OIL:
+    factor: 0.85
+    rationale: "Mixed company and personal SIM usage."
+  RET_FMCG:
+    factor: 1.2
+    rationale: "High turnover staff. Personal SIMs common."
+  FIN_BANK:
+    factor: 0.9
+    rationale: "Compliance driven. Fewer personal SIMs at work."
+  AGR_GRAIN:
+    factor: 1.5
+    rationale: "Seasonal workers. SIM sharing prevalent."
+  AGR_CASH:
+    factor: 1.4
+    rationale: "Similar to grain agriculture."
+  AGR_SUGAR:
+    factor: 1.3
+    rationale: "Large seasonal workforce during crushing."
+  CON_INFRA:
+    factor: 1.3
+    rationale: "Temporary workers. Project based SIM usage."
+  TEL_MOBILE:
+    factor: 0.7
+    rationale: "Employees receive company SIMs as employee benefit."
+  MAN_GENERAL:
+    factor: 1.0
+    rationale: "Baseline. No specific adjustment."
+  SVC_PROFESSIONAL:
+    factor: 0.9
+    rationale: "Office based. Company phone policies common."

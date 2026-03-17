@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(source:*)",
+      "Bash(touch:*)",
+      "Bash(cd:*)",
+      "Bash(for f:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(find:*)"
+    ]
+  }
+}

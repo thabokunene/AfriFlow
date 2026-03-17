@@ -1,0 +1,74 @@
+[
+    {
+        "file_path": "afriflow/client_briefing/__init__.py",
+        "line_number": 15,
+        "severity": "high",
+        "issue_type": "import_error",
+        "original_snippet": "from client_briefing.briefing_generator import",
+        "suggested_fix": "from afriflow.client_briefing.briefing_generator import"
+    },
+    {
+        "file_path": "afriflow/client_briefing/briefing_generator.py",
+        "line_number": 19,
+        "severity": "medium",
+        "issue_type": "unused_import",
+        "original_snippet": "from datetime import datetime, date",
+        "suggested_fix": "from datetime import datetime"
+    },
+    {
+        "file_path": "afriflow/client_briefing/briefing_generator.py",
+        "line_number": 21,
+        "severity": "medium",
+        "issue_type": "unused_import",
+        "original_snippet": "import textwrap",
+        "suggested_fix": "Remove import textwrap"
+    },
+    {
+        "file_path": "afriflow/client_briefing/briefing_generator.py",
+        "line_number": 185,
+        "severity": "critical",
+        "issue_type": "type_mismatch",
+        "original_snippet": "relationship_snapshot=snapshot,",
+        "suggested_fix": "Add relationship_snapshot field to ClientBriefing dataclass"
+    },
+    {
+        "file_path": "afriflow/client_briefing/briefing_generator.py",
+        "line_number": 186,
+        "severity": "critical",
+        "issue_type": "type_mismatch",
+        "original_snippet": "changes_since_last_meeting=changes,",
+        "suggested_fix": "Update _build_changes to return List[ChangeEvent] instead of BriefingSection"
+    },
+    {
+        "file_path": "afriflow/client_briefing/briefing_generator.py",
+        "line_number": 187,
+        "severity": "critical",
+        "issue_type": "type_mismatch",
+        "original_snippet": "top_opportunities=opportunities,",
+        "suggested_fix": "Update _build_opportunities to return List[Opportunity] instead of BriefingSection"
+    },
+    {
+        "file_path": "afriflow/client_briefing/briefing_generator.py",
+        "line_number": 188,
+        "severity": "critical",
+        "issue_type": "type_mismatch",
+        "original_snippet": "risk_alerts=risks,",
+        "suggested_fix": "Update _build_risks to return List[RiskAlert] instead of BriefingSection"
+    },
+    {
+        "file_path": "afriflow/client_briefing/briefing_generator.py",
+        "line_number": 189,
+        "severity": "critical",
+        "issue_type": "type_mismatch",
+        "original_snippet": "talking_points=talking,",
+        "suggested_fix": "Update _build_talking_points to return List[str] instead of BriefingSection"
+    },
+    {
+        "file_path": "afriflow/client_briefing/briefing_generator.py",
+        "line_number": 190,
+        "severity": "critical",
+        "issue_type": "type_mismatch",
+        "original_snippet": "seasonal_context=seasonal_section,",
+        "suggested_fix": "Add seasonal_context field to ClientBriefing dataclass"
+    }
+]

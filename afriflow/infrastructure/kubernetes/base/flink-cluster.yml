@@ -1,0 +1,670 @@
+# AfriFlow Flink Session Cluster
+#
+# We deploy Apache Flink for real-time stream processing
+# across all domains. This session cluster supports
+# multiple concurrent jobs with high availability.
+#
+# DISCLAIMER: This project is not a sanctioned initiative
+# of Standard Bank Group, MTN, or any affiliated entity.
+# It is a demonstration of concept, domain knowledge,
+# and data engineering skill by Thabo Kunene.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flink-config
+  namespace: afriflow
+  labels:
+    app: flink
+    app.kubernetes.io/name: flink
+    app.kubernetes.io/component: cluster
+data:
+  flink-conf.yaml: |
+    # JobManager configuration
+    jobmanager.rpc.address: flink-jobmanager
+    jobmanager.rpc.port: 6123
+    jobmanager.bind-host: 0.0.0.0
+    jobmanager.memory.process.size: 2048m
+    
+    # TaskManager configuration
+    taskmanager.bind-host: 0.0.0.0
+    taskmanager.numberOfTaskSlots: 4
+    taskmanager.memory.process.size: 4096m
+    taskmanager.memory.network.fraction: 0.1
+    taskmanager.memory.network.min: 256mb
+    taskmanager.memory.network.max: 1gb
+    
+    # High Availability (Kubernetes)
+    high-availability: kubernetes
+    high-availability.storageDir: s3://afriflow-flink-ha/
+    high-availability.kubernetes.namespace: afriflow
+    high-availability.kubernetes.cluster-id: flink-session-cluster
+    
+    # Checkpointing configuration
+    execution.checkpointing.interval: 60000
+    execution.checkpointing.timeout: 300000
+    execution.checkpointing.max-concurrent-checkpoints: 1
+    execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+    state.backend: rocksdb
+    state.checkpoints.dir: s3://afriflow-flink-checkpoints/
+    state.savepoints.dir: s3://afriflow-flink-savepoints/
+    state.backend.incremental: true
+    
+    # Restart strategy
+    restart-strategy: fixed-delay
+    restart-strategy.fixed-delay.attempts: 3
+    restart-strategy.fixed-delay.delay: 10s
+    
+    # Metrics & Monitoring (Prometheus)
+    metrics.reporter.prom.class: org.apache.flink.metrics.prometheus.PrometheusReporter
+    metrics.reporter.prom.port: 9249
+    metrics.scope.delimiter: /
+    metrics.latency.history-size: 1
+    metrics.latency.interval: 60000
+    
+    # Network & Buffer configuration
+    taskmanager.memory.segment-size: 32kb
+    taskmanager.network.numberOfBuffers: 10
+    taskmanager.network.memory.floating-buffers-per-gate: 8
+    taskmanager.network.memory.request-backoff.initial: 100
+    taskmanager.network.memory.request-backoff.max: 10000
+    
+    # Security
+    ssl.internal.enabled: false
+    ssl.rest.enabled: false
+    
+    # Web UI
+    rest.address: 0.0.0.0
+    rest.port: 8081
+    web.submit.enable: true
+    web.cancel.enable: true
+    web.refresh-interval: 3000
+    
+    # Parallelism defaults
+    parallelism.default: 4
+    
+    # Time characteristic
+    execution.runtime-mode: STREAMING
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flink-jobmanager
+  namespace: afriflow
+  labels:
+    app: flink
+    app.kubernetes.io/name: flink
+    app.kubernetes.io/component: jobmanager
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9249"
+    prometheus.io/path: "/"
+spec:
+  type: ClusterIP
+  ports:
+    - name: rpc
+      port: 6123
+      targetPort: rpc
+      protocol: TCP
+    - name: blob-server
+      port: 6124
+      targetPort: blob-server
+      protocol: TCP
+    - name: web-ui
+      port: 8081
+      targetPort: web-ui
+      protocol: TCP
+    - name: metrics
+      port: 9249
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app: flink
+    app.kubernetes.io/name: flink
+    app.kubernetes.io/component: jobmanager
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flink-taskmanager
+  namespace: afriflow
+  labels:
+    app: flink
+    app.kubernetes.io/name: flink
+    app.kubernetes.io/component: taskmanager
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9249"
+    prometheus.io/path: "/"
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: data
+      port: 6121
+      targetPort: data
+      protocol: TCP
+    - name: metrics
+      port: 9249
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app: flink
+    app.kubernetes.io/name: flink
+    app.kubernetes.io/component: taskmanager
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-jobmanager
+  namespace: afriflow
+  labels:
+    app: flink
+    app.kubernetes.io/name: flink
+    app.kubernetes.io/component: jobmanager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flink
+      app.kubernetes.io/name: flink
+      app.kubernetes.io/component: jobmanager
+  template:
+    metadata:
+      labels:
+        app: flink
+        app.kubernetes.io/name: flink
+        app.kubernetes.io/component: jobmanager
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9249"
+        prometheus.io/path: "/"
+    spec:
+      serviceAccountName: flink-service-account
+      securityContext:
+        fsGroup: 9999
+        runAsUser: 9999
+        runAsGroup: 9999
+      containers:
+        # Flink JobManager
+        - name: jobmanager
+          image: flink:1.18.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - jobmanager
+          ports:
+            - name: rpc
+              containerPort: 6123
+              protocol: TCP
+            - name: blob-server
+              containerPort: 6124
+              protocol: TCP
+            - name: web-ui
+              containerPort: 8081
+              protocol: TCP
+          env:
+            - name: FLINK_PROPERTIES
+              value: |
+                jobmanager.rpc.address: flink-jobmanager
+          resources:
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          volumeMounts:
+            - name: flink-config
+              mountPath: /opt/flink/conf/flink-conf.yaml
+              subPath: flink-conf.yaml
+            - name: flink-storage
+              mountPath: /var/flink/storage
+            - name: flink-checkpoints
+              mountPath: /var/flink/checkpoints
+            - name: flink-savepoints
+              mountPath: /var/flink/savepoints
+          livenessProbe:
+            httpGet:
+              path: /overview
+              port: web-ui
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /overview
+              port: web-ui
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+        
+        # Prometheus JMX Exporter Sidecar
+        - name: jmx-exporter
+          image: prom/jmx-exporter:0.18.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 9249
+              protocol: TCP
+          args:
+            - "9249"
+            - /etc/jmx-exporter/config.yml
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: jmx-config
+              mountPath: /etc/jmx-exporter
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      
+      volumes:
+        - name: flink-config
+          configMap:
+            name: flink-config
+            defaultMode: 0644
+        - name: flink-storage
+          persistentVolumeClaim:
+            claimName: flink-storage-pvc
+        - name: flink-checkpoints
+          persistentVolumeClaim:
+            claimName: flink-checkpoints-pvc
+        - name: flink-savepoints
+          persistentVolumeClaim:
+            claimName: flink-savepoints-pvc
+        - name: jmx-config
+          configMap:
+            name: jmx-exporter-config
+            defaultMode: 0644
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: flink
+                    app.kubernetes.io/name: flink
+                    app.kubernetes.io/component: jobmanager
+                topologyKey: kubernetes.io/hostname
+      
+      nodeSelector:
+        afriflow/node-type: streaming
+      
+      tolerations:
+        - key: "workload"
+          operator: "Equal"
+          value: "streaming"
+          effect: "NoSchedule"
+      
+      terminationGracePeriodSeconds: 60
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-taskmanager
+  namespace: afriflow
+  labels:
+    app: flink
+    app.kubernetes.io/name: flink
+    app.kubernetes.io/component: taskmanager
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: flink
+      app.kubernetes.io/name: flink
+      app.kubernetes.io/component: taskmanager
+  template:
+    metadata:
+      labels:
+        app: flink
+        app.kubernetes.io/name: flink
+        app.kubernetes.io/component: taskmanager
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9249"
+        prometheus.io/path: "/"
+    spec:
+      serviceAccountName: flink-service-account
+      securityContext:
+        fsGroup: 9999
+        runAsUser: 9999
+        runAsGroup: 9999
+      initContainers:
+        - name: wait-for-jobmanager
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - 'sh'
+            - '-c'
+            - |
+              echo "Waiting for JobManager to be ready..."
+              until nc -z flink-jobmanager 6123; do
+                echo "JobManager not ready, waiting..."
+                sleep 5
+              done
+              echo "JobManager is ready!"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      
+      containers:
+        # Flink TaskManager
+        - name: taskmanager
+          image: flink:1.18.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - taskmanager
+          ports:
+            - name: data
+              containerPort: 6121
+              protocol: TCP
+            - name: metrics
+              containerPort: 9249
+              protocol: TCP
+          env:
+            - name: FLINK_PROPERTIES
+              value: |
+                jobmanager.rpc.address: flink-jobmanager
+                taskmanager.host: $(POD_IP)
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          resources:
+            requests:
+              cpu: "2"
+              memory: "4Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          volumeMounts:
+            - name: flink-config
+              mountPath: /opt/flink/conf/flink-conf.yaml
+              subPath: flink-conf.yaml
+            - name: flink-storage
+              mountPath: /var/flink/storage
+          livenessProbe:
+            tcpSocket:
+              port: data
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            tcpSocket:
+              port: data
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+        
+        # Prometheus JMX Exporter Sidecar
+        - name: jmx-exporter
+          image: prom/jmx-exporter:0.18.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 9249
+              protocol: TCP
+          args:
+            - "9249"
+            - /etc/jmx-exporter/config.yml
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: jmx-config
+              mountPath: /etc/jmx-exporter
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      
+      volumes:
+        - name: flink-config
+          configMap:
+            name: flink-config
+            defaultMode: 0644
+        - name: flink-storage
+          persistentVolumeClaim:
+            claimName: flink-storage-pvc
+        - name: jmx-config
+          configMap:
+            name: jmx-exporter-config
+            defaultMode: 0644
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: flink
+                    app.kubernetes.io/name: flink
+                    app.kubernetes.io/component: taskmanager
+                topologyKey: kubernetes.io/hostname
+      
+      nodeSelector:
+        afriflow/node-type: streaming
+      
+      tolerations:
+        - key: "workload"
+          operator: "Equal"
+          value: "streaming"
+          effect: "NoSchedule"
+      
+      terminationGracePeriodSeconds: 60
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: flink-jobmanager-pdb
+  namespace: afriflow
+  labels:
+    app: flink
+    app.kubernetes.io/name: flink
+    app.kubernetes.io/component: jobmanager
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: flink
+      app.kubernetes.io/name: flink
+      app.kubernetes.io/component: jobmanager
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: flink-taskmanager-pdb
+  namespace: afriflow
+  labels:
+    app: flink
+    app.kubernetes.io/name: flink
+    app.kubernetes.io/component: taskmanager
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: flink
+      app.kubernetes.io/name: flink
+      app.kubernetes.io/component: taskmanager
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flink-storage-pvc
+  namespace: afriflow
+  labels:
+    app: flink
+    app.kubernetes.io/name: flink
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: gp3-ssd
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flink-checkpoints-pvc
+  namespace: afriflow
+  labels:
+    app: flink
+    app.kubernetes.io/name: flink
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: gp3-ssd
+  resources:
+    requests:
+      storage: 100Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flink-savepoints-pvc
+  namespace: afriflow
+  labels:
+    app: flink
+    app.kubernetes.io/name: flink
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: gp3-ssd
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jmx-exporter-config
+  namespace: afriflow
+  labels:
+    app: flink
+data:
+  config.yml: |
+    lowercaseOutputName: true
+    lowercaseOutputLabelNames: true
+    rules:
+      - pattern: 'flink<jobmanager_status>(.*):'
+        name: flink_jobmanager_status
+        type: GAUGE
+      - pattern: 'flink<taskmanager_status>(.*):'
+        name: flink_taskmanager_status
+        type: GAUGE
+      - pattern: 'flink<job=(.*), subtask=(.*), task=(.*)> (.*)'
+        name: flink_task_$4
+        type: GAUGE
+        labels:
+          job: "$1"
+          subtask: "$2"
+          task: "$3"
+      - pattern: 'flink<job=(.*), task=(.*)> (.*)'
+        name: flink_job_$3
+        type: GAUGE
+        labels:
+          job: "$1"
+          task: "$2"
+      - pattern: 'flink<(.*)> (.*)'
+        name: flink_$2
+        type: GAUGE
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flink-service-account
+  namespace: afriflow
+  labels:
+    app: flink
+    app.kubernetes.io/name: flink
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: flink-role
+  namespace: afriflow
+  labels:
+    app: flink
+    app.kubernetes.io/name: flink
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: flink-role-binding
+  namespace: afriflow
+  labels:
+    app: flink
+    app.kubernetes.io/name: flink
+subjects:
+  - kind: ServiceAccount
+    name: flink-service-account
+    namespace: afriflow
+roleRef:
+  kind: Role
+  name: flink-role
+  apiGroup: rbac.authorization.k8s.io

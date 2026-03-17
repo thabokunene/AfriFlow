@@ -1,0 +1,24 @@
+{
+  "type": "record",
+  "name": "InsuranceClaim",
+  "namespace": "com.afriflow.insurance.v1",
+  "doc": "Insurance claim event.",
+  "fields": [
+    {"name": "claim_id", "type": "string"},
+    {"name": "policy_id", "type": "string"},
+    {"name": "policyholder_id", "type": "string"},
+    {"name": "claim_type", "type": "string", "doc": "death | disability | retrenchment | vehicle_accident | property_damage | cargo_loss | trade_default"},
+    {"name": "claimed_amount", "type": "double"},
+    {"name": "approved_amount", "type": ["null", "double"], "default": null},
+    {"name": "currency", "type": "string"},
+    {"name": "country", "type": "string"},
+    {"name": "incident_date", "type": "string"},
+    {"name": "submitted_at", "type": "string"},
+    {"name": "status", "type": "string", "doc": "pending | under_review | approved | rejected | paid"},
+    {"name": "assessor_id", "type": ["null", "string"], "default": null},
+    {"name": "rejection_reason", "type": ["null", "string"], "default": null},
+    {"name": "paid_at", "type": ["null", "string"], "default": null},
+    {"name": "ingested_at", "type": "string"},
+    {"name": "schema_version", "type": "string", "default": "1.0"}
+  ]
+}

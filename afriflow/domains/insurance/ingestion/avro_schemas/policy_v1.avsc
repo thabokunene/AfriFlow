@@ -1,0 +1,26 @@
+{
+  "type": "record",
+  "name": "InsurancePolicy",
+  "namespace": "com.afriflow.insurance.v1",
+  "doc": "Insurance policy record from Standard Bank Insurance or MTN Insurance.",
+  "fields": [
+    {"name": "policy_id", "type": "string"},
+    {"name": "policy_type", "type": "string", "doc": "group_life | funeral_cover | vehicle | property | marine_cargo | trade_credit | health"},
+    {"name": "policyholder_id", "type": "string"},
+    {"name": "policyholder_golden_id", "type": ["null", "string"], "default": null},
+    {"name": "insurer", "type": "string"},
+    {"name": "country", "type": "string"},
+    {"name": "currency", "type": "string"},
+    {"name": "sum_assured", "type": "double"},
+    {"name": "annual_premium", "type": "double"},
+    {"name": "inception_date", "type": "string"},
+    {"name": "expiry_date", "type": "string"},
+    {"name": "status", "type": "string", "doc": "active | lapsed | expired | claimed | cancelled"},
+    {"name": "is_corporate", "type": "boolean", "default": false},
+    {"name": "employer_id", "type": ["null", "string"], "default": null},
+    {"name": "employee_count_covered", "type": ["null", "int"], "default": null},
+    {"name": "free_look_end_date", "type": ["null", "string"], "default": null},
+    {"name": "ingested_at", "type": "string"},
+    {"name": "schema_version", "type": "string", "default": "1.0"}
+  ]
+}
