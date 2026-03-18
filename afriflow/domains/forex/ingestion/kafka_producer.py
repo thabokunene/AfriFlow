@@ -479,6 +479,11 @@ class ForexKafkaProducer:
                 logger.error(
                     f"Failed to send {record_type} {record_id}: {e}"
                 )
+            except Exception as e:
+                failed_count += 1
+                logger.error(
+                    f"Unexpected error for {record_type} {idx}: {e}"
+                )
 
         if self.producer:
             self.producer.flush()

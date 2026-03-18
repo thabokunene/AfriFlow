@@ -91,6 +91,7 @@ def producer_config():
         retries=3,
         metrics_enabled=False,  # Disable for tests
         metrics_interval_seconds=1,
+        dlq_topic=None,  # Disable DLQ for tests
     )
 
 
@@ -381,7 +382,6 @@ class TestInsuranceKafkaProducer:
     ):
         """Test circuit breaker opens after failures."""
         mock_producer = Mock()
-        # Make both produce and DLQ send fail
         mock_producer.produce.side_effect = Exception("Connection failed")
         mock_producer_class.return_value = mock_producer
         
@@ -392,12 +392,11 @@ class TestInsuranceKafkaProducer:
         
         producer = InsuranceKafkaProducer(config=producer_config)
         producer.circuit_breaker.failure_threshold = 3
-        producer.dlq_topic = None  # Disable DLQ to avoid additional failures
         
-        # Cause failures
+        # Cause failures - use sync mode to ensure delivery callback is called
         for _ in range(3):
             try:
-                producer.produce_policy({"policy_id": "1"})
+                producer.produce_policy({"policy_id": "1"}, sync=True)
             except DeliveryError:
                 pass
         

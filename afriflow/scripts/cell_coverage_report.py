@@ -13,6 +13,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--xml", default="coverage.xml")
     p.add_argument("--json", dest="json_path", default="coverage.json")
     p.add_argument("--include-subpath", default="domains/cell")
+    p.add_argument("--include-file-pattern", default=None)
     p.add_argument(
         "--exclude-subpath",
         action="append",
@@ -156,6 +157,10 @@ def main() -> int:
     for filename, cov in sorted(cobertura.items(), key=lambda x: x[0]):
         if not should_include(filename, args.include_subpath, args.exclude_subpath):
             continue
+        if args.include_file_pattern:
+            import re
+            if not re.search(args.include_file_pattern, normalize(filename)):
+                continue
 
         line_pct = (
             pct(cov["lines_covered"], cov["lines_valid"])

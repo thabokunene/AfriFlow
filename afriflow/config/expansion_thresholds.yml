@@ -1,0 +1,142 @@
+# @file expansion_thresholds.yml
+# @description Expansion signal detection thresholds for cross-domain business opportunity identification
+# @author Thabo Kunene
+# @created 2026-03-17
+# config/expansion_thresholds.yml
+
+# Expansion Signal Detection Thresholds
+# 
+# These thresholds control when cross-domain evidence is sufficient
+# to generate a high-confidence expansion alert.
+#
+# Usage:
+#   from afriflow.config.loader import ConfigLoader
+#   loader = ConfigLoader()
+#   settings = loader.load()
+#   thresholds = settings.expansion_thresholds
+
+# Minimum evidence thresholds for signal generation
+# These thresholds prevent false positives by requiring sufficient cross-domain activity
+min_evidence:
+  # Minimum number of CIB payments to a new corridor
+  # Set to 3 to ensure genuine business activity (not one-off transactions)
+  cib_payments_count: 3
+  
+  # Minimum total CIB payment value in ZAR
+  # R1M threshold filters for meaningful commercial expansion (not personal transfers)
+  cib_value_zar: 1000000
+  
+  # Minimum number of SIM activations in new country
+  # 20 activations indicates legitimate market entry (not test SIMs)
+  sim_activations_count: 20
+  
+  # Minimum number of forex trades in new currency
+  # 2 trades minimum shows hedging activity (not speculative single trade)
+  forex_trades_count: 2
+  
+  # Minimum payroll accounts in new country
+  # 5 accounts suggests established operations (not contractor payments)
+  pbb_accounts_count: 5
+
+# Confidence scoring weights
+# Weighted scoring system prioritizes CIB payments as strongest expansion signal
+scoring_weights:
+  # CIB payment evidence (max points: 40)
+  # Highest weighting - direct commercial activity evidence
+  cib_payment_base_points: 20
+  cib_value_per_million_points: 10  # Additional points per R1M in payments
+  
+  # Cell SIM activation evidence (max points: 25)
+  # Medium weighting - indicates operational presence and workforce
+  sim_activation_base_points: 15
+  sim_per_10_activations_points: 5  # Scale with activation volume
+  
+  # Forex hedging evidence (max points: 15)
+  # Medium weighting - shows financial sophistication and risk management
+  forex_hedge_present_points: 15
+  
+  # Insurance coverage evidence (max points: 10)
+  # Lower weighting - supplementary evidence of established operations
+  insurance_coverage_present_points: 10
+  
+  # PBB payroll evidence (max points: 10)
+  # Lower weighting - workforce indicator but less expansion-specific
+  pbb_payroll_present_points: 10
+
+# Confidence thresholds for alert routing
+# Tiered system ensures appropriate response based on expansion likelihood
+confidence_thresholds:
+  # Minimum confidence to generate any signal
+  # 40 points (out of 100) filters noise while capturing early expansion signals
+  min_signal_confidence: 40
+  
+  # Confidence for medium priority alerts
+  # 60 points indicates moderate expansion likelihood - routine business development follow-up
+  medium_priority_threshold: 60
+  
+  # Confidence for high priority alerts
+  # 80 points shows strong expansion evidence - immediate relationship manager engagement
+  high_priority_threshold: 80
+  
+  # Confidence for urgent/critical alerts
+  # 90 points represents near-certain expansion - executive-level intervention required
+  urgent_priority_threshold: 90
+
+# Opportunity estimation parameters
+# Revenue projections guide resource allocation and relationship management priorities
+opportunity_estimation:
+  # Base fee rates by client tier (percentage of flow)
+  # Tiered pricing reflects relationship value and volume commitments
+  fee_rates:
+    platinum: 0.005  # 0.5% - highest volume, negotiated rates
+    gold: 0.008      # 0.8% - high volume clients
+    silver: 0.010    # 1.0% - medium volume clients
+    bronze: 0.012    # 1.2% - standard retail rates
+  
+  # FX hedging opportunity rate (percentage of unhedged flow)
+  # 0.3% represents typical FX margin on hedging products
+  fx_hedge_opportunity_rate: 0.003
+  
+  # Insurance opportunity rate (percentage of uninsured flow)
+  # 0.2% reflects insurance premium rates for trade/credit insurance
+  insurance_opportunity_rate: 0.002
+  
+  # Payroll revenue per employee in ZAR
+  # R2,500 annual revenue per employee (account fees, transaction charges)
+  payroll_revenue_per_employee: 2500
+
+# Lookback configuration
+# Time windows balance signal freshness with statistical significance
+lookback:
+  # Default lookback period in days
+  # 90 days captures seasonal business cycles while maintaining recency
+  default_days: 90
+  
+  # Minimum lookback for high-value clients
+  # 180 days for large clients to account for longer decision cycles
+  high_value_client_days: 180
+  
+  # Maximum lookback for trend analysis
+  # 365 days allows annual seasonal pattern detection
+  max_trend_analysis_days: 365
+
+# Country-specific adjustments (optional overrides)
+# Market maturity adjustments account for different business environments and risk profiles
+country_adjustments:
+  # High-growth markets with lower thresholds
+  # More aggressive expansion detection in rapidly growing economies
+  high_growth:
+    countries: ["NG", "KE", "GH", "TZ"]  # Nigeria, Kenya, Ghana, Tanzania
+    threshold_reduction_factor: 0.8  # 20% reduction - easier to trigger signals
+  
+  # Mature markets with standard thresholds
+  # Established markets with predictable patterns and lower risk
+  mature:
+    countries: ["ZA", "MU"]  # South Africa, Mauritius
+    threshold_reduction_factor: 1.0  # Standard thresholds apply
+  
+  # Emerging markets with higher thresholds (more validation needed)
+  # Higher uncertainty requires stronger evidence before signal generation
+  emerging:
+    countries: ["CD", "MZ", "ZM"]  # DRC, Mozambique, Zambia
+    threshold_reduction_factor: 1.2  # 20% increase - more validation required

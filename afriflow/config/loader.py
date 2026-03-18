@@ -11,11 +11,9 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
-import os
 import yaml
 from pathlib import Path
 from typing import Optional, Dict, Any
-import logging
 
 from afriflow.config.settings import (
     Settings,
@@ -26,7 +24,7 @@ from afriflow.config.settings import (
     SeasonalPattern,
 )
 from afriflow.exceptions import ConfigurationError
-from afriflow.logging_config import get_logger, log_operation
+from afriflow.logging_config import get_logger
 
 logger = get_logger("config.loader")
 
@@ -85,9 +83,9 @@ class ConfigLoader:
                 revenue_data
             )
 
-            # Load expansion thresholds (from expansion_signal config)
+            # Load expansion thresholds
             expansion_data = self._load_yaml_file(
-                "sim_deflation_factors.yml"
+                "expansion_thresholds.yml"
             )
             expansion_thresholds = self._parse_expansion_thresholds(
                 expansion_data
@@ -194,9 +192,40 @@ class ConfigLoader:
         self,
         data: Dict[str, Any]
     ) -> ExpansionThresholds:
-        """Parse expansion thresholds from config data."""
+        """
+        Parse expansion thresholds from config data.
+
+        Args:
+            data: Raw configuration data from YAML file
+
+        Returns:
+            Validated ExpansionThresholds object
+        """
         try:
-            return ExpansionThresholds()
+            min_evidence = data.get("min_evidence", {})
+            
+            return ExpansionThresholds(
+                min_cib_payments_for_signal=min_evidence.get(
+                    "cib_payments_count",
+                    ExpansionThresholds.model_fields["min_cib_payments_for_signal"].default
+                ),
+                min_cib_value_for_signal=min_evidence.get(
+                    "cib_value_zar",
+                    ExpansionThresholds.model_fields["min_cib_value_for_signal"].default
+                ),
+                min_sim_activations_for_signal=min_evidence.get(
+                    "sim_activations_count",
+                    ExpansionThresholds.model_fields["min_sim_activations_for_signal"].default
+                ),
+                min_forex_trades_for_signal=min_evidence.get(
+                    "forex_trades_count",
+                    ExpansionThresholds.model_fields["min_forex_trades_for_signal"].default
+                ),
+                min_pbb_accounts_for_signal=min_evidence.get(
+                    "pbb_accounts_count",
+                    ExpansionThresholds.model_fields["min_pbb_accounts_for_signal"].default
+                ),
+            )
         except Exception as e:
             logger.warning(
                 f"Using default expansion thresholds: {e}"

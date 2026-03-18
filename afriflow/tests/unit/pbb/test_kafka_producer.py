@@ -86,6 +86,7 @@ def producer_config():
         retries=3,
         metrics_enabled=False,  # Disable for tests
         metrics_interval_seconds=1,
+        dlq_topic=None,  # Disable DLQ for tests
     )
 
 
@@ -387,10 +388,10 @@ class TestPBBKafkaProducer:
         producer = PBBKafkaProducer(config=producer_config)
         producer.circuit_breaker.failure_threshold = 3
         
-        # Cause failures
+        # Cause failures - use sync mode to ensure delivery callback is called
         for _ in range(3):
             try:
-                producer.produce_account({"account_id": "1"})
+                producer.produce_account({"account_id": "1"}, sync=True)
             except DeliveryError:
                 pass
         

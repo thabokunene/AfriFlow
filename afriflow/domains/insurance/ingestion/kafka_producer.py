@@ -568,6 +568,7 @@ class InsuranceKafkaProducer:
 
         except Exception as e:
             self.logger.error(f"Failed to produce event to {topic}: {e}")
+            self.circuit_breaker.record_failure()
             with self._metrics_lock:
                 self.metrics.record_failure(type(e).__name__)
             if self.dlq_topic:

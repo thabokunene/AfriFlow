@@ -66,6 +66,19 @@ class ExpansionThresholds(BaseModel):
     Used by the expansion detector to determine when
     cross-domain evidence is sufficient to generate
     a high-confidence expansion alert.
+
+    Attributes:
+        min_cib_payments_for_signal: Minimum CIB payments to trigger signal
+        min_cib_value_for_signal: Minimum CIB value in ZAR for signal
+        min_sim_activations_for_signal: Minimum SIM activations for signal
+        min_forex_trades_for_signal: Minimum forex trades for signal
+        min_pbb_accounts_for_signal: Minimum payroll accounts for signal
+
+    Example:
+        >>> thresholds = ExpansionThresholds(
+        ...     min_cib_payments_for_signal=5,
+        ...     min_cib_value_for_signal=2_000_000
+        ... )
     """
 
     min_cib_payments_for_signal: int = Field(
@@ -83,6 +96,16 @@ class ExpansionThresholds(BaseModel):
         description="Minimum SIM activations for signal",
         ge=1
     )
+    min_forex_trades_for_signal: int = Field(
+        default=2,
+        description="Minimum forex trades for signal",
+        ge=1
+    )
+    min_pbb_accounts_for_signal: int = Field(
+        default=5,
+        description="Minimum payroll accounts for signal",
+        ge=1
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -90,6 +113,91 @@ class ExpansionThresholds(BaseModel):
                 "min_cib_payments_for_signal": 3,
                 "min_cib_value_for_signal": 1000000.0,
                 "min_sim_activations_for_signal": 20,
+                "min_forex_trades_for_signal": 2,
+                "min_pbb_accounts_for_signal": 5,
+            }
+        }
+    }
+
+
+class ExpansionScoringWeights(BaseModel):
+    """
+    Scoring weights for expansion signal confidence calculation.
+
+    Each evidence type contributes points toward the overall
+    confidence score. Maximum total is 100 points.
+
+    Attributes:
+        cib_payment_base_points: Base points for CIB payments
+        cib_value_per_million_points: Points per million ZAR
+        sim_activation_base_points: Base points for SIM activations
+        sim_per_10_activations_points: Points per 10 SIM activations
+        forex_hedge_present_points: Points for forex hedging
+        insurance_coverage_present_points: Points for insurance
+        pbb_payroll_present_points: Points for payroll presence
+
+    Example:
+        >>> weights = ExpansionScoringWeights(
+        ...     cib_payment_base_points=25,
+        ...     forex_hedge_present_points=20
+        ... )
+    """
+
+    cib_payment_base_points: int = Field(default=20, ge=0, le=40)
+    cib_value_per_million_points: int = Field(default=10, ge=0, le=20)
+    sim_activation_base_points: int = Field(default=15, ge=0, le=25)
+    sim_per_10_activations_points: int = Field(default=5, ge=0, le=10)
+    forex_hedge_present_points: int = Field(default=15, ge=0, le=15)
+    insurance_coverage_present_points: int = Field(default=10, ge=0, le=10)
+    pbb_payroll_present_points: int = Field(default=10, ge=0, le=10)
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "cib_payment_base_points": 20,
+                "cib_value_per_million_points": 10,
+                "sim_activation_base_points": 15,
+                "sim_per_10_activations_points": 5,
+                "forex_hedge_present_points": 15,
+                "insurance_coverage_present_points": 10,
+                "pbb_payroll_present_points": 10,
+            }
+        }
+    }
+
+
+class ExpansionConfidenceThresholds(BaseModel):
+    """
+    Confidence thresholds for alert routing.
+
+    Determines how expansion signals are prioritized
+    based on their confidence scores.
+
+    Attributes:
+        min_signal_confidence: Minimum to generate any signal
+        medium_priority_threshold: Threshold for medium priority
+        high_priority_threshold: Threshold for high priority
+        urgent_priority_threshold: Threshold for urgent priority
+
+    Example:
+        >>> thresholds = ExpansionConfidenceThresholds(
+        ...     min_signal_confidence=35,
+        ...     high_priority_threshold=75
+        ... )
+    """
+
+    min_signal_confidence: int = Field(default=40, ge=0, le=100)
+    medium_priority_threshold: int = Field(default=60, ge=0, le=100)
+    high_priority_threshold: int = Field(default=80, ge=0, le=100)
+    urgent_priority_threshold: int = Field(default=90, ge=0, le=100)
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "min_signal_confidence": 40,
+                "medium_priority_threshold": 60,
+                "high_priority_threshold": 80,
+                "urgent_priority_threshold": 90,
             }
         }
     }

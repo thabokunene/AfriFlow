@@ -1,0 +1,70 @@
+{
+  "subtrees": [
+    {
+      "name": "cell_ingestion",
+      "path": "domains/cell/ingestion",
+      "filters": {
+        "file_patterns": ["**/*.py"],
+        "naming_regex": null,
+        "file_types": ["py"],
+        "date_range": null
+      },
+      "conditions": {
+        "branch_gate_env": "ENABLE_CELL_BRANCH_GATE",
+        "function_gate_env": "ENABLE_CELL_FUNC_GATE"
+      },
+      "gates": {
+        "line_min": 90,
+        "branch_min": 90,
+        "func_min": 90,
+        "include_file_pattern": null,
+        "write_md": "coverage/cell_ingestion_coverage.md",
+        "write_json": "coverage/cell_ingestion_coverage_summary.json"
+      }
+    },
+    {
+      "name": "forex_ingestion",
+      "path": "domains/forex/ingestion",
+      "filters": {
+        "file_patterns": ["**/*.py"],
+        "naming_regex": null,
+        "file_types": ["py"],
+        "date_range": null
+      },
+      "conditions": {
+        "branch_gate_env": "ENABLE_FOREX_BRANCH_GATE",
+        "function_gate_env": "ENABLE_FOREX_FUNC_GATE"
+      },
+      "gates": {
+        "line_min": 90,
+        "branch_min": 90,
+        "func_min": 90,
+        "include_file_pattern": null,
+        "write_md": "coverage/forex_ingestion_coverage.md",
+        "write_json": "coverage/forex_ingestion_coverage_summary.json"
+      }
+    },
+    {
+      "name": "cib_flink_flow_drift",
+      "path": "domains/cib/processing/flink",
+      "filters": {
+        "file_patterns": ["**/flow_drift_detector.py"],
+        "naming_regex": "flow_drift_detector\\.py$",
+        "file_types": ["py"],
+        "date_range": null
+      },
+      "conditions": {
+        "branch_gate_env": "ENABLE_CIB_BRANCH_GATE",
+        "function_gate_env": "ENABLE_CIB_FUNC_GATE"
+      },
+      "gates": {
+        "line_min": 90,
+        "branch_min": 0,
+        "func_min": 0,
+        "include_file_pattern": "flow_drift_detector\\.py",
+        "write_md": "coverage/flow_drift_detector_coverage.md",
+        "write_json": "coverage/flow_drift_detector_coverage_summary.json"
+      }
+    }
+  ]
+}

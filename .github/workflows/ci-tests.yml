@@ -83,7 +83,45 @@ jobs:
         working-directory: afriflow
         run: python -m coverage json -o coverage.json
 
-      - name: Cell per-module coverage breakdown (line + branch + functions)
+      - name: Detect cell ingestion changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          filters: |
+            ingest:
+              - 'afriflow/domains/cell/ingestion/**'
+
+      - name: Compute changed files list
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          git fetch origin ${GITHUB_BASE_REF} --depth=1 || true
+          git diff --name-only origin/${GITHUB_BASE_REF}...HEAD > changed_files.txt || git diff --name-only HEAD~1 > changed_files.txt
+          mkdir -p afriflow/coverage
+          python - <<'PY'
+          import json
+          files = [l.strip() for l in open('changed_files.txt', 'r', encoding='utf-8') if l.strip()]
+          files = [f for f in files if f]
+          obj = {"files": files}
+          import os
+          os.makedirs('afriflow/coverage', exist_ok=True)
+          with open('afriflow/coverage/changed_files.json', 'w', encoding='utf-8') as w:
+              json.dump(obj, w)
+          PY
+
+      - name: Log gate decision (cell ingestion)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          if [ "${{ steps.filter.outputs.ingest }}" = "true" ]; then
+            echo "Cell ingestion changes detected -> 90% gate APPLIED" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No cell ingestion changes -> 90% gate SKIPPED" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Enforce 90% coverage (cell ingestion when changed)
+        if: github.event_name == 'pull_request' && steps.filter.outputs.ingest == 'true'
         shell: bash
         working-directory: afriflow
         run: |
@@ -98,6 +136,48 @@ jobs:
             --write-json coverage/cell_ingestion_coverage_summary.json \
             --github-summary "$GITHUB_STEP_SUMMARY"
 
+      - name: Run scalable gating framework
+        if: github.event_name == 'pull_request'
+        working-directory: afriflow
+        run: |
+          python scripts/gating_framework.py \
+            --config afriflow/config/coverage_gates.json \
+            --coverage-xml coverage.xml \
+            --coverage-json coverage.json \
+            --changed-files coverage/changed_files.json \
+            --log-json coverage/gating_log.json
+
+      - name: Forex module-specific coverage (line >=90%)
+        shell: bash
+        working-directory: afriflow
+        run: |
+          python scripts/cell_coverage_report.py \
+            --xml coverage.xml \
+            --json coverage.json \
+            --include-subpath domains/forex/ingestion \
+            --line-min 90 \
+            --branch-min 0 \
+            --func-min 0 \
+            --write-md coverage/forex_ingestion_coverage.md \
+            --write-json coverage/forex_ingestion_coverage_summary.json \
+            --github-summary "$GITHUB_STEP_SUMMARY"
+
+      - name: FlowDriftDetector module-specific coverage (line >=90%)
+        shell: bash
+        working-directory: afriflow
+        run: |
+          python scripts/cell_coverage_report.py \
+            --xml coverage.xml \
+            --json coverage.json \
+            --include-subpath domains/cib/processing/flink \
+            --include-file-pattern "flow_drift_detector\.py" \
+            --line-min 90 \
+            --branch-min 0 \
+            --func-min 0 \
+            --write-md coverage/flow_drift_detector_coverage.md \
+            --write-json coverage/flow_drift_detector_coverage_summary.json \
+            --github-summary "$GITHUB_STEP_SUMMARY"
+
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -108,6 +188,10 @@ jobs:
             afriflow/htmlcov
             afriflow/coverage/cell_ingestion_coverage.md
             afriflow/coverage/cell_ingestion_coverage_summary.json
+            afriflow/coverage/forex_ingestion_coverage.md
+            afriflow/coverage/forex_ingestion_coverage_summary.json
+            afriflow/coverage/flow_drift_detector_coverage.md
+            afriflow/coverage/flow_drift_detector_coverage_summary.json
 
       - name: Enforce per-file coverage gate (>=90%)
         working-directory: afriflow

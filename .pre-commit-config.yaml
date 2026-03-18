@@ -6,3 +6,8 @@ repos:
         entry: python afriflow/scripts/check_imports.py --check --path domains
         language: system
         files: ^afriflow/domains/.*\.py$
+      - id: validate-targeted-coverage
+        name: Validate module-specific coverage (forex + flow drift)
+        entry: python afriflow/scripts/precommit_coverage_check.py
+        language: system
+        pass_filenames: false
