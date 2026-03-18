@@ -1,0 +1,5 @@
+{
+  "_comment": "AfriFlow CI benchmark baseline history. Auto-updated by scripts/benchmark_ci.py on every CI run. Commit this file to persist baselines across branches.",
+  "generated": null,
+  "runs": {}
+}

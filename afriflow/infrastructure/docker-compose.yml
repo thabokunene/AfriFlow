@@ -1,86 +1,103 @@
-# AfriFlow Docker Compose - Development Environment
-#
-# We provide local development environment with all
-# dependencies: Kafka, Schema Registry, Spark, Flink,
-# and Delta Lake.
+# =============================================================================
+# @file docker-compose.yml
+# @description Full local development stack for AfriFlow. Spins up all
+#              platform dependencies in a single Docker network: event
+#              streaming (Kafka + ZooKeeper + Schema Registry), batch
+#              processing (Spark), stream processing (Flink), object storage
+#              (MinIO), relational metadata store (PostgreSQL), caching
+#              (Redis), observability (Prometheus + Grafana), and pipeline
+#              orchestration (Airflow). All credentials are sourced from the
+#              sibling .env file.
+# @author Thabo Kunene
+# @created 2026-03-17
+# =============================================================================
 
+# Compose file schema version — 3.8 supports deploy/resources for resource caps
 version: '3.8'
 
+# ---------------------------------------------------------------------------
+# SHARED RESOURCE LIMITS ANCHOR
+# Reused across lightweight services via YAML merge key (<<: *resource-limits)
+# to prevent any single container from starving the host machine.
+# ---------------------------------------------------------------------------
 x-resource-limits: &resource-limits
   deploy:
     resources:
       limits:
-        cpus: '0.50'
-        memory: 512M
+        cpus: '0.50'      # Hard cap: half a CPU core
+        memory: 512M      # Hard cap: 512 MB RAM
       reservations:
-        cpus: '0.25'
-        memory: 256M
+        cpus: '0.25'      # Guaranteed minimum: quarter CPU core
+        memory: 256M      # Guaranteed minimum: 256 MB RAM
 
 services:
   # =============================================================================
   # APACHE KAFKA - Event Streaming Platform
+  # ZooKeeper manages Kafka broker metadata and leader election.
+  # Schema Registry enforces Avro/Protobuf schema contracts on every topic.
   # =============================================================================
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
+    image: confluentinc/cp-zookeeper:7.5.0    # Confluent-packaged ZooKeeper for Kafka coordination
     container_name: afriflow-zookeeper
-    <<: *resource-limits
+    <<: *resource-limits                       # Apply shared lightweight resource caps
     environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_CLIENT_PORT: 2181              # Port Kafka brokers use to connect to ZooKeeper
+      ZOOKEEPER_TICK_TIME: 2000                # Heartbeat interval in ms; controls session timeouts
     volumes:
-      - zookeeper-data:/var/lib/zookeeper/data
-      - zookeeper-logs:/var/lib/zookeeper/log
+      - zookeeper-data:/var/lib/zookeeper/data  # Persist ZooKeeper snapshots across restarts
+      - zookeeper-logs:/var/lib/zookeeper/log   # Persist ZooKeeper transaction logs
     networks:
       - afriflow-network
     ports:
-      - "2181:2181"
+      - "2181:2181"    # Expose ZooKeeper client port to host for debugging
 
   kafka:
-    image: confluentinc/cp-kafka:7.5.0
+    image: confluentinc/cp-kafka:7.5.0        # Confluent Kafka broker
     container_name: afriflow-kafka
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 1G
+          cpus: '1.0'     # Kafka needs more CPU headroom than lighter services
+          memory: 1G      # 1 GB keeps a single-broker dev cluster stable
     depends_on:
-      - zookeeper
+      - zookeeper          # Kafka registers with ZooKeeper on startup
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_BROKER_ID: 1                       # Unique numeric ID for this broker in the cluster
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181  # ZooKeeper connection string using service name
+      # Two listener configs: internal Docker network (29092) and external host access (9092)
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT  # Brokers talk to each other on the internal listener
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1    # Single broker dev: RF=1 avoids under-replicated warnings
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"       # Allow producers to create topics on first publish
+      KAFKA_NUM_PARTITIONS: 3                        # Default partition count for auto-created topics
     volumes:
-      - kafka-data:/var/lib/kafka/data
+      - kafka-data:/var/lib/kafka/data         # Persist topic segment files and offsets
     networks:
       - afriflow-network
     ports:
-      - "9092:9092"
+      - "9092:9092"    # Expose external listener so host-side producers/consumers can connect
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      interval: 30s    # Check every 30 seconds
+      timeout: 10s     # Fail the check if no response within 10 seconds
+      retries: 5       # Mark unhealthy after 5 consecutive failures
 
   schema-registry:
-    image: confluentinc/cp-schema-registry:7.5.0
+    image: confluentinc/cp-schema-registry:7.5.0   # Confluent Schema Registry for schema governance
     container_name: afriflow-schema-registry
     <<: *resource-limits
     depends_on:
-      - kafka
+      - kafka            # Needs an active Kafka broker to store schemas in an internal topic
     environment:
-      SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
-      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
-      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: BACKWARD
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry                         # Advertised hostname within Docker network
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092          # Store schemas in Kafka (internal listener)
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081                     # HTTP endpoint for schema CRUD operations
+      SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL: BACKWARD               # New schemas must be backward-compatible
     networks:
       - afriflow-network
     ports:
-      - "8081:8081"
+      - "8081:8081"    # Schema Registry REST API accessible from host
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
       interval: 30s
@@ -89,29 +106,31 @@ services:
 
   # =============================================================================
   # APACHE SPARK - Batch Processing
+  # Master coordinates job scheduling; workers execute tasks in parallel.
+  # Domain code and schemas are bind-mounted so changes are reflected immediately.
   # =============================================================================
   spark-master:
-    image: apache/spark:3.5.0
+    image: apache/spark:3.5.0                  # Official Apache Spark image
     container_name: afriflow-spark-master
     deploy:
       resources:
         limits:
           cpus: '1.0'
           memory: 1G
-    command: bin/spark-class org.apache.spark.deploy.master.Master
+    command: bin/spark-class org.apache.spark.deploy.master.Master  # Start in master mode
     environment:
-      SPARK_MASTER_HOST: spark-master
-      SPARK_MASTER_PORT: 7088
-      SPARK_MASTER_WEBUI_PORT: 8080
+      SPARK_MASTER_HOST: spark-master          # Hostname workers use to register
+      SPARK_MASTER_PORT: 7088                  # RPC port for worker registration and job submission
+      SPARK_MASTER_WEBUI_PORT: 8080            # Web UI port (overrides default 8080 to avoid conflicts)
     volumes:
-      - spark-master-data:/opt/spark/work-dir
-      - ../domains:/opt/spark/app/domains
-      - ../schemas:/opt/spark/app/schemas
+      - spark-master-data:/opt/spark/work-dir              # Scratch space for Spark master state
+      - ../domains:/opt/spark/app/domains                  # Live-mount domain processing code
+      - ../schemas:/opt/spark/app/schemas                  # Live-mount Avro/JSON schemas
     networks:
       - afriflow-network
     ports:
-      - "8080:8080"
-      - "7088:7088"
+      - "8080:8080"    # Spark Master Web UI
+      - "7088:7088"    # Spark Master RPC port (for spark-submit from host)
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 30s
@@ -122,18 +141,18 @@ services:
     image: apache/spark:3.5.0
     container_name: afriflow-spark-worker
     deploy:
-      replicas: 2
+      replicas: 2      # Run two worker containers to simulate a small cluster
       resources:
         limits:
           cpus: '1.0'
-          memory: 2G
+          memory: 2G   # Workers need more memory than master for actual task execution
     depends_on:
       - spark-master
     command: bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7088
     environment:
-      SPARK_WORKER_CORES: 2
-      SPARK_WORKER_MEMORY: 2g
-      SPARK_MASTER: spark://spark-master:7088
+      SPARK_WORKER_CORES: 2        # CPU cores each worker advertises to the master
+      SPARK_WORKER_MEMORY: 2g      # RAM each worker advertises for executor allocation
+      SPARK_MASTER: spark://spark-master:7088   # Master URL for worker registration
     volumes:
       - spark-worker-data:/opt/spark/work-dir
       - ../domains:/opt/spark/app/domains
@@ -141,28 +160,30 @@ services:
     networks:
       - afriflow-network
     ports:
-      - "8082:8081"
+      - "8082:8081"    # Spark Worker Web UI (mapped to 8082 on host to avoid port clash)
 
   # =============================================================================
   # APACHE FLINK - Stream Processing
+  # JobManager allocates resources and coordinates jobs; TaskManagers execute them.
+  # Domain code is mounted under usrlib so Flink can load custom JAR/Python jobs.
   # =============================================================================
   flink-jobmanager:
-    image: flink:1.18.0
+    image: flink:1.18.0                        # Official Apache Flink image
     container_name: afriflow-flink-jobmanager
     <<: *resource-limits
-    command: jobmanager
+    command: jobmanager                         # Start in JobManager (coordinator) mode
     environment:
       - FLINK_PROPERTIES=
-        jobmanager.rpc.address: flink-jobmanager
-      - JOB_MANAGER_RPC_PORT=6123
+        jobmanager.rpc.address: flink-jobmanager    # RPC address TaskManagers use to register
+      - JOB_MANAGER_RPC_PORT=6123                    # RPC port for job submission and task coordination
     volumes:
-      - flink-jobmanager-data:/var/lib/flink
-      - ../domains:/opt/flink/usrlib
+      - flink-jobmanager-data:/var/lib/flink          # Persist checkpoints and savepoints
+      - ../domains:/opt/flink/usrlib                  # Make domain JARs/scripts available to Flink
     networks:
       - afriflow-network
     ports:
-      - "8083:8081"
-      - "6123:6123"
+      - "8083:8081"    # Flink Dashboard Web UI (mapped to 8083 to avoid Spark UI clash)
+      - "6123:6123"    # Flink RPC port for job submission from host
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081"]
       interval: 30s
@@ -173,45 +194,47 @@ services:
     image: flink:1.18.0
     container_name: afriflow-flink-taskmanager
     deploy:
-      replicas: 2
+      replicas: 2      # Two TaskManagers simulate a small distributed Flink cluster
       resources:
         limits:
           cpus: '1.0'
           memory: 2G
     depends_on:
       - flink-jobmanager
-    command: taskmanager
+    command: taskmanager                        # Start in TaskManager (worker) mode
     environment:
       - FLINK_PROPERTIES=
-        jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 4
-        taskmanager.memory.process.size: 2048m
+        jobmanager.rpc.address: flink-jobmanager          # JobManager address to register with
+        taskmanager.numberOfTaskSlots: 4                  # Parallelism slots available per TaskManager
+        taskmanager.memory.process.size: 2048m            # Total JVM process memory for this TaskManager
     volumes:
       - flink-taskmanager-data:/var/lib/flink
       - ../domains:/opt/flink/usrlib
     networks:
       - afriflow-network
     ports:
-      - "8084:8081"
+      - "8084:8081"    # Per-TaskManager UI (mapped to 8084 on host)
 
   # =============================================================================
   # MINIO - S3-Compatible Storage (for local dev)
+  # Acts as the local data lake, replacing S3/GCS in production. Delta Lake
+  # tables and raw ingestion files are stored here.
   # =============================================================================
   minio:
-    image: minio/minio:RELEASE.2024-01-01T16-36-33Z
+    image: minio/minio:RELEASE.2024-01-01T16-36-33Z   # Pinned MinIO release for reproducibility
     container_name: afriflow-minio
     <<: *resource-limits
-    command: server /data --console-address ":9001"
+    command: server /data --console-address ":9001"    # Serve data from /data; expose web console on 9001
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}              # Loaded from .env — S3-equivalent access key
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}      # Loaded from .env — S3-equivalent secret key
     volumes:
-      - minio-data:/data
+      - minio-data:/data    # Persist bucket objects across container restarts
     networks:
       - afriflow-network
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9000:9000"    # MinIO S3 API endpoint (used by Spark, Flink, and other clients)
+      - "9001:9001"    # MinIO web console for bucket browsing and management
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
@@ -220,42 +243,46 @@ services:
 
   # =============================================================================
   # POSTGRESQL - Metadata Store
+  # Stores Airflow DAG/task state, execution history, and connection configs.
+  # An init.sql script bootstraps any additional AfriFlow-specific schemas.
   # =============================================================================
   postgres:
-    image: postgres:15.4
+    image: postgres:15.4                        # PostgreSQL 15 for JSON support and performance improvements
     container_name: afriflow-postgres
     <<: *resource-limits
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}           # Loaded from .env
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}   # Loaded from .env
+      POSTGRES_DB: ${POSTGRES_DB}               # Loaded from .env — database created on first boot
     volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ../schemas/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres-data:/var/lib/postgresql/data                        # Persist database files
+      - ../schemas/init.sql:/docker-entrypoint-initdb.d/init.sql      # Auto-run schema init on first start
     networks:
       - afriflow-network
     ports:
-      - "5432:5432"
+      - "5432:5432"    # Standard PostgreSQL port exposed for host-side psql access
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
-      interval: 10s
+      interval: 10s    # Faster interval — other services depend on Postgres being ready
       timeout: 5s
       retries: 5
 
   # =============================================================================
   # REDIS - Caching Layer
+  # Used by Airflow for Celery result backend and task queuing (if CeleryExecutor
+  # is enabled). Also available as a general-purpose cache for domain services.
   # =============================================================================
   redis:
-    image: redis:7.2-alpine
+    image: redis:7.2-alpine                     # Lightweight Alpine-based Redis 7
     container_name: afriflow-redis
     <<: *resource-limits
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes      # Enable AOF persistence so data survives restarts
     volumes:
-      - redis-data:/data
+      - redis-data:/data    # Persist AOF log files
     networks:
       - afriflow-network
     ports:
-      - "6379:6379"
+      - "6379:6379"    # Standard Redis port exposed for host-side redis-cli access
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -264,48 +291,52 @@ services:
 
   # =============================================================================
   # GRAFANA - Monitoring & Visualization
+  # Renders dashboards backed by Prometheus metrics. Dashboard and datasource
+  # configs are provisioned from the monitoring/ directory at startup.
   # =============================================================================
   grafana:
     image: grafana/grafana:10.2.0
     container_name: afriflow-grafana
     <<: *resource-limits
     environment:
-      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER}
-      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
-      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER}         # Loaded from .env
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD} # Loaded from .env
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource  # Pre-install useful plugins
     volumes:
-      - grafana-data:/var/lib/grafana
-      - ../monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ../monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - grafana-data:/var/lib/grafana                                              # Persist user data and settings
+      - ../monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards      # Auto-provision dashboards
+      - ../monitoring/grafana/datasources:/etc/grafana/provisioning/datasources    # Auto-provision data sources
     networks:
       - afriflow-network
     ports:
-      - "3000:3000"
+      - "3000:3000"    # Grafana web UI
     depends_on:
-      - prometheus
+      - prometheus     # Grafana needs Prometheus running to query metrics on startup
 
   # =============================================================================
   # PROMETHEUS - Metrics Collection
+  # Scrapes metrics from all AfriFlow services and stores time-series data.
+  # Grafana queries Prometheus for dashboard rendering.
   # =============================================================================
   prometheus:
     image: prom/prometheus:v2.48.0
     container_name: afriflow-prometheus
     <<: *resource-limits
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=200h'
-      - '--web.enable-lifecycle'
+      - '--config.file=/etc/prometheus/prometheus.yml'              # Path to scrape config
+      - '--storage.tsdb.path=/prometheus'                           # Time-series database storage path
+      - '--web.console.libraries=/etc/prometheus/console_libraries' # Built-in console JS libraries
+      - '--web.console.templates=/etc/prometheus/consoles'          # Built-in console HTML templates
+      - '--storage.tsdb.retention.time=200h'                        # Keep ~8 days of metrics in local TSDB
+      - '--web.enable-lifecycle'                                     # Enable /-/reload endpoint for hot config reload
     volumes:
-      - prometheus-data:/prometheus
-      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ../monitoring/prometheus/rules.yml:/etc/prometheus/rules.yml
+      - prometheus-data:/prometheus                                              # Persist TSDB files
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml  # Scrape targets and intervals
+      - ../monitoring/prometheus/rules.yml:/etc/prometheus/rules.yml            # Alerting and recording rules
     networks:
       - afriflow-network
     ports:
-      - "9090:9090"
+      - "9090:9090"    # Prometheus web UI and query API
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
       interval: 30s
@@ -314,6 +345,8 @@ services:
 
   # =============================================================================
   # AIRFLOW - Orchestration
+  # Webserver hosts the DAG UI; Scheduler triggers DAG runs on their defined
+  # schedules. Both share the same Postgres metadata DB and DAG directory.
   # =============================================================================
   airflow-webserver:
     image: apache/airflow:2.8.0
@@ -324,26 +357,26 @@ services:
           cpus: '1.0'
           memory: 1G
     environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
-      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
-      _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow-providers-apache-spark apache-airflow-providers-apache-kafka
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor                                           # Run tasks locally (no Celery needed for dev)
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}  # Metadata DB connection
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}                                # Encryption key for stored credentials
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"                              # New DAGs start paused — must be manually enabled
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"                                           # Suppress Airflow's bundled example DAGs
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth               # Enable basic auth for REST API
+      _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow-providers-apache-spark apache-airflow-providers-apache-kafka  # Install Spark + Kafka providers at container start
     volumes:
-      - airflow-dags:/opt/airflow/dags
-      - airflow-logs:/opt/airflow/logs
-      - airflow-plugins:/opt/airflow/plugins
-      - ../orchestration/airflow/dags:/opt/airflow/dags
-      - ../orchestration/airflow/plugins:/opt/airflow/plugins
+      - airflow-dags:/opt/airflow/dags                                    # Named volume for DAG persistence
+      - airflow-logs:/opt/airflow/logs                                     # Task execution logs
+      - airflow-plugins:/opt/airflow/plugins                               # Custom Airflow operators/hooks
+      - ../orchestration/airflow/dags:/opt/airflow/dags                    # Bind-mount project DAGs (takes precedence)
+      - ../orchestration/airflow/plugins:/opt/airflow/plugins              # Bind-mount project plugins
     networks:
       - afriflow-network
     ports:
-      - "8085:8080"
+      - "8085:8080"    # Airflow web UI (mapped to 8085 to avoid clash with Spark master on 8080)
     depends_on:
-      - postgres
-      - redis
+      - postgres       # Airflow metadata DB must be ready before webserver initialises
+      - redis          # Redis available for potential Celery backend upgrade
 
   airflow-scheduler:
     image: apache/airflow:2.8.0
@@ -363,33 +396,43 @@ services:
       - airflow-dags:/opt/airflow/dags
       - airflow-logs:/opt/airflow/logs
       - airflow-plugins:/opt/airflow/plugins
-      - ../orchestration/airflow/dags:/opt/airflow/dags
+      - ../orchestration/airflow/dags:/opt/airflow/dags    # Same DAG source as webserver
       - ../orchestration/airflow/plugins:/opt/airflow/plugins
     networks:
       - afriflow-network
     depends_on:
-      - airflow-webserver
+      - airflow-webserver    # Webserver performs DB migration (initdb) before scheduler starts
 
+# ---------------------------------------------------------------------------
+# NETWORK
+# All services communicate on a dedicated bridge network with a fixed subnet,
+# enabling predictable container DNS resolution by service name.
+# ---------------------------------------------------------------------------
 networks:
   afriflow-network:
-    driver: bridge
+    driver: bridge         # Standard Linux bridge — suitable for single-host dev
     ipam:
       config:
-        - subnet: 172.28.0.0/16
+        - subnet: 172.28.0.0/16    # Fixed subnet avoids collision with common host networks
 
+# ---------------------------------------------------------------------------
+# NAMED VOLUMES
+# Docker manages these volumes independently of the container lifecycle so
+# data is retained when containers are stopped or recreated.
+# ---------------------------------------------------------------------------
 volumes:
-  zookeeper-data:
-  zookeeper-logs:
-  kafka-data:
-  spark-master-data:
-  spark-worker-data:
-  flink-jobmanager-data:
-  flink-taskmanager-data:
-  minio-data:
-  postgres-data:
-  redis-data:
-  grafana-data:
-  prometheus-data:
-  airflow-dags:
-  airflow-logs:
-  airflow-plugins:
+  zookeeper-data:          # ZooKeeper snapshot data
+  zookeeper-logs:          # ZooKeeper transaction logs
+  kafka-data:              # Kafka topic segment files and consumer offsets
+  spark-master-data:       # Spark master working directory
+  spark-worker-data:       # Spark worker task output and shuffle data
+  flink-jobmanager-data:   # Flink checkpoints and savepoints
+  flink-taskmanager-data:  # Flink task output buffers
+  minio-data:              # MinIO bucket objects (raw and processed data)
+  postgres-data:           # PostgreSQL database files
+  redis-data:              # Redis AOF persistence log
+  grafana-data:            # Grafana user preferences and dashboard state
+  prometheus-data:         # Prometheus time-series database (TSDB)
+  airflow-dags:            # Airflow DAG file storage (named volume fallback)
+  airflow-logs:            # Airflow task execution logs
+  airflow-plugins:         # Airflow custom plugin storage

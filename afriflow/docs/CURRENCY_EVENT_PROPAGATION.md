@@ -1,4 +1,9 @@
-<!-- docs/CURRENCY_EVENT_PROPAGATION.md -->
+<!--
+@file CURRENCY_EVENT_PROPAGATION.md
+@description Framework for classifying and propagating currency events across domains
+@author Thabo Kunene
+@created 2026-03-17
+-->
 
 # AfriFlow Currency Event Propagation Framework
 

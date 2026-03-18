@@ -1,0 +1,99 @@
+# =============================================================================
+# @file docker-compose.dev.yml
+# @description Development override file for the AfriFlow Docker Compose stack.
+#              Apply on top of docker-compose.yml with:
+#                docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+#              Overrides resource limits, enables hot-reload bind mounts, and
+#              exposes additional debug ports not needed in a production-like
+#              environment.
+# @author Thabo Kunene
+# @created 2026-03-17
+# =============================================================================
+
+# Compose schema version — must match docker-compose.yml
+version: '3.8'
+
+services:
+  # ---------------------------------------------------------------------------
+  # KAFKA - Development overrides
+  # Relax replication constraints and expose JMX for local monitoring tooling.
+  # ---------------------------------------------------------------------------
+  kafka:
+    environment:
+      KAFKA_LOG_RETENTION_HOURS: 2              # Shorter retention in dev — avoids disk bloat
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824       # 1 GB segment size (default) kept for compatibility
+      KAFKA_JMX_PORT: 9999                      # Expose JMX so tools like JConsole can connect
+      KAFKA_JMX_HOSTNAME: localhost
+    ports:
+      - "9999:9999"    # JMX debug port — not exposed in production compose
+
+  # ---------------------------------------------------------------------------
+  # SPARK MASTER - Development overrides
+  # Increase log verbosity and expose the history server port for job debugging.
+  # ---------------------------------------------------------------------------
+  spark-master:
+    environment:
+      SPARK_MASTER_LOG_LEVEL: DEBUG             # Verbose logging helps diagnose job submission issues
+    ports:
+      - "18080:18080"  # Spark History Server UI (if history server is started separately)
+
+  # ---------------------------------------------------------------------------
+  # SPARK WORKER - Development overrides
+  # Mount the full project root so ad-hoc scripts can reference any module.
+  # ---------------------------------------------------------------------------
+  spark-worker:
+    environment:
+      SPARK_WORKER_LOG_LEVEL: DEBUG
+    volumes:
+      - ../../:/opt/spark/app/project            # Bind-mount entire AfriFlow project root for dev convenience
+
+  # ---------------------------------------------------------------------------
+  # FLINK JOBMANAGER - Development overrides
+  # Enable the REST API and expose an additional port for the Flink CLI.
+  # ---------------------------------------------------------------------------
+  flink-jobmanager:
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        rest.port: 8081                          # REST API port (also used by the web UI)
+        execution.checkpointing.interval: 10000  # Checkpoint every 10 s in dev for faster recovery testing
+
+  # ---------------------------------------------------------------------------
+  # POSTGRES - Development overrides
+  # Expose an additional admin port and set more permissive connection limits.
+  # ---------------------------------------------------------------------------
+  postgres:
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust          # Allow password-free local connections during development
+    command: >
+      postgres
+        -c log_statement=all                    # Log every SQL statement for debugging ORM queries
+        -c log_duration=on                      # Log query execution time alongside each statement
+
+  # ---------------------------------------------------------------------------
+  # MINIO - Development overrides
+  # Enable verbose request logging to trace S3 API calls from Spark/Flink jobs.
+  # ---------------------------------------------------------------------------
+  minio:
+    environment:
+      MINIO_LOGGER_HTTP_ENABLE: "on"            # Log all incoming HTTP requests to stdout
+
+  # ---------------------------------------------------------------------------
+  # AIRFLOW WEBSERVER - Development overrides
+  # Disable authentication for frictionless local access.
+  # ---------------------------------------------------------------------------
+  airflow-webserver:
+    environment:
+      AIRFLOW__WEBSERVER__AUTHENTICATE: "False"  # No login required in local dev
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"      # Keep example DAGs suppressed
+      AIRFLOW__LOGGING__LOGGING_LEVEL: DEBUG      # Verbose task logs for debugging custom operators
+
+  # ---------------------------------------------------------------------------
+  # GRAFANA - Development overrides
+  # Allow anonymous access so team members can view dashboards without logging in.
+  # ---------------------------------------------------------------------------
+  grafana:
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"         # Skip login for read-only dashboard access in dev
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer        # Anonymous users get read-only viewer role
+      GF_LOG_LEVEL: debug                       # Verbose Grafana logs for datasource troubleshooting

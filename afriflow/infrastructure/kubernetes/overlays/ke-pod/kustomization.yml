@@ -1,0 +1,137 @@
+# =============================================================================
+# @file kustomization.yml
+# @description Kustomize overlay for the Kenya country-pod (ke-pod).
+#              This overlay customises the base AfriFlow manifests for the
+#              Nairobi-region deployment by patching namespace labels,
+#              replica counts, resource limits, and country-specific
+#              configuration values. Kustomize overlays are preferred over
+#              Helm values files here because they allow targeted JSON-patch
+#              and strategic-merge-patch operations without templating the
+#              entire base manifest.
+# @author Thabo Kunene
+# @created 2026-03-17
+# =============================================================================
+
+# Kustomize overlay definition for the Kenya country-pod.
+# Running "kubectl apply -k overlays/ke-pod/" from the kubernetes/ directory
+# produces a complete set of resources with Kenya-specific patches applied
+# on top of the shared base/ configuration.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# ---- Base resources -------------------------------------------------------
+# Point to the shared base/ directory one level up. All resources defined
+# in base/ (namespace, kafka-cluster, flink-cluster, spark-operator) are
+# included unless explicitly excluded via the "resources" list below.
+resources:
+  - ../../base
+
+# ---- Namespace override ---------------------------------------------------
+# All base resources use namespace: afriflow. For the Kenya pod we keep the
+# same namespace name but add a country suffix via a namePrefix/nameSuffix
+# or patch. Using the same namespace across pods simplifies cross-pod
+# service discovery via Kubernetes federation or Istio service mesh.
+namespace: afriflow
+
+# ---- Common labels applied to every resource in this overlay --------------
+# These labels are merged into the metadata.labels of every resource so
+# that operators can filter Kenya-specific objects with:
+#   kubectl get all -l afriflow/country-pod=ke
+commonLabels:
+  afriflow/country-pod: ke          # ISO 3166-1 alpha-2 code for Kenya
+  afriflow/region: east-africa      # Broad geographic grouping for multi-region dashboards
+  afriflow/environment: production  # Matches the base namespace environment label
+
+# ---- Common annotations applied to every resource ------------------------
+# Annotations carry metadata consumed by CI/CD tooling (e.g. ArgoCD, Flux)
+# and cost-allocation systems, without affecting Kubernetes scheduling.
+commonAnnotations:
+  afriflow/deployment-region: af-east-1      # AWS region closest to Nairobi (hypothetical)
+  afriflow/managed-by: kustomize             # Signals that Kustomize owns the lifecycle
+  afriflow/country-contact: ops-ke@afriflow  # On-call contact for Kenya pod alerts
+
+# ---- Images ---------------------------------------------------------------
+# Override specific image tags for the Kenya pod if a regional image mirror
+# or a canary version is being tested. Using the images block (rather than
+# a patch) keeps image management explicit and auditable in one place.
+images:
+  # Pin the Flink image to the same version as the base but pulled from a
+  # regional ECR mirror to reduce cross-region data transfer costs.
+  - name: flink
+    newName: flink
+    newTag: "1.18.0"
+  # Pin the Spark operator image similarly.
+  - name: docker.io/kubeflow/spark-operator
+    newName: docker.io/kubeflow/spark-operator
+    newTag: "v1beta2-1.5.0-3.3.0"
+
+# ---- ConfigMap generators -------------------------------------------------
+# Generate a Kenya-specific ConfigMap that holds country-level tuning values
+# consumed by Flink and Spark jobs at runtime (e.g. currency codes, Kafka
+# topic prefixes, timezone offsets).
+configMapGenerator:
+  - name: afriflow-ke-config
+    # literals are key=value pairs injected directly without a source file.
+    literals:
+      - COUNTRY_CODE=KE
+      - CURRENCY_CODE=KES                   # Kenyan Shilling
+      - KAFKA_TOPIC_PREFIX=ke               # Topics prefixed "ke." in this pod
+      - FLINK_PARALLELISM=4                 # Matches base taskmanager.numberOfTaskSlots
+      - SPARK_EXECUTOR_INSTANCES=2          # Starting executor count for batch jobs
+      - TIMEZONE=Africa/Nairobi             # EAT (UTC+3), no DST
+      - DATA_RETENTION_DAYS=90             # Regulatory minimum for Kenya CBK compliance
+      - MNO_PARTNER=Safaricom              # Primary mobile network operator for cell data
+
+# ---- Patches --------------------------------------------------------------
+# Strategic merge patches selectively override fields in base resources.
+# Each patch file lives alongside this kustomization.yml and contains only
+# the fields that differ from the base — not the full resource spec.
+patches:
+  # Scale the Flink TaskManager down to 1 replica for the Kenya pod.
+  # Kenya has lower transaction volume than South Africa (za-primary), so
+  # fewer TaskManagers reduce idle cluster cost while still satisfying
+  # AfriFlow's 4-slot parallelism requirement.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: flink-taskmanager
+        namespace: afriflow
+      spec:
+        replicas: 1  # 1 TM × 4 slots = 4 total slots; enough for KE domain jobs
+    target:
+      kind: Deployment
+      name: flink-taskmanager
+
+  # Scale Spark executor instances to 2 for Kenya batch jobs (base default).
+  # Dynamic allocation will grow this up to 5 for end-of-day reconciliations.
+  - patch: |-
+      apiVersion: sparkoperator.k8s.io/v1beta2
+      kind: SparkApplication
+      metadata:
+        name: spark-py-template
+        namespace: afriflow
+      spec:
+        dynamicAllocation:
+          maxExecutors: 5  # Lower cap than za-primary (10) reflects smaller data volume
+    target:
+      kind: SparkApplication
+      name: spark-py-template
+
+  # Apply the Kenya-specific node selector so pods land on nodes
+  # provisioned in the Nairobi edge location (af-east-1 zone).
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: flink-jobmanager
+        namespace: afriflow
+      spec:
+        template:
+          spec:
+            nodeSelector:
+              afriflow/node-type: streaming
+              afriflow/country-pod: ke  # Additional selector narrows to KE nodes
+    target:
+      kind: Deployment
+      name: flink-jobmanager

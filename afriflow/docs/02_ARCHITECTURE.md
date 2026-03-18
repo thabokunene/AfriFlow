@@ -1,4 +1,10 @@
-﻿# 02 Architecture
+<!--
+@file 02_ARCHITECTURE.md
+@description Architectural principles and high-level design for AfriFlow deployment model
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 02 Architecture
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

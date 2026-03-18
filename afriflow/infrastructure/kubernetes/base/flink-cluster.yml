@@ -1,92 +1,190 @@
-# AfriFlow Flink Session Cluster
-#
-# We deploy Apache Flink for real-time stream processing
-# across all domains. This session cluster supports
-# multiple concurrent jobs with high availability.
-#
+# =============================================================================
+# @file flink-cluster.yml
+# @description Deploys an Apache Flink Session Cluster for real-time stream
+#              processing across all AfriFlow domains. Resources defined here:
+#                - ConfigMap        flink-config          (Flink config YAML)
+#                - Service          flink-jobmanager      (RPC + Web UI)
+#                - Service          flink-taskmanager     (headless, data plane)
+#                - Deployment       flink-jobmanager      (1 replica + HA)
+#                - Deployment       flink-taskmanager     (2 replicas)
+#                - PodDisruptionBudget x2                 (rolling-update safety)
+#                - PersistentVolumeClaim x3               (storage, checkpoints, savepoints)
+#                - ConfigMap        jmx-exporter-config   (Prometheus metric rules)
+#                - ServiceAccount   flink-service-account
+#                - Role             flink-role
+#                - RoleBinding      flink-role-binding
+#              A Session Cluster is used (rather than per-job Application Mode)
+#              because AfriFlow runs multiple concurrent domain jobs (forex,
+#              insurance, PBB, cell) that benefit from shared JVM warm-up and
+#              a shared Web UI for operational visibility.
+# @author Thabo Kunene
+# @created 2026-03-17
+# =============================================================================
+
 # DISCLAIMER: This project is not a sanctioned initiative
 # of Standard Bank Group, MTN, or any affiliated entity.
 # It is a demonstration of concept, domain knowledge,
 # and data engineering skill by Thabo Kunene.
 
+# ---- Resource 1: Flink Configuration ConfigMap ----------------------------
+# Centralises all Flink properties in one Kubernetes object so that both the
+# JobManager and TaskManager Deployments mount the same config file, preventing
+# configuration drift between the two components.
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: flink-config
   namespace: afriflow
   labels:
+    # "app: flink" is the short selector used by Services and Deployments.
     app: flink
+    # Kubernetes recommended labels provide interoperability with tools like
+    # Helm, kubectl-tree, and the Kubernetes Dashboard.
     app.kubernetes.io/name: flink
     app.kubernetes.io/component: cluster
 data:
   flink-conf.yaml: |
     # JobManager configuration
+    # The RPC address matches the Service name "flink-jobmanager" so that
+    # TaskManagers can resolve it via cluster-internal DNS.
     jobmanager.rpc.address: flink-jobmanager
     jobmanager.rpc.port: 6123
+    # Bind to all interfaces inside the pod; external access is controlled
+    # by the Service, not by a restrict bind address.
     jobmanager.bind-host: 0.0.0.0
+    # 2048 MiB covers the JobManager's coordination overhead for dozens of
+    # concurrent Flink jobs. The JVM off-heap is factored in automatically.
     jobmanager.memory.process.size: 2048m
-    
+
     # TaskManager configuration
     taskmanager.bind-host: 0.0.0.0
+    # 4 slots per TaskManager allows parallelism.default=4 to be fully
+    # satisfied by a single TaskManager, reducing inter-pod data transfer
+    # for simple pipelines. More complex jobs scale across both TMs.
     taskmanager.numberOfTaskSlots: 4
+    # 4096 MiB gives each TaskManager enough heap for RocksDB state +
+    # network buffers + JVM overhead. Matches the pod resource limit below.
     taskmanager.memory.process.size: 4096m
+    # Network memory fraction: 10% of total memory reserved for shuffle
+    # buffers, bounded between 256 MiB and 1 GiB to avoid starvation on
+    # small tasks or waste on large ones.
     taskmanager.memory.network.fraction: 0.1
     taskmanager.memory.network.min: 256mb
     taskmanager.memory.network.max: 1gb
-    
+
     # High Availability (Kubernetes)
+    # Kubernetes-native HA stores JobManager metadata in ConfigMaps rather
+    # than an external ZooKeeper, keeping the dependency footprint small.
     high-availability: kubernetes
+    # S3 is used as the durable HA storage directory so that a rescheduled
+    # JobManager pod can recover job state from object storage.
     high-availability.storageDir: s3://afriflow-flink-ha/
     high-availability.kubernetes.namespace: afriflow
+    # The cluster-id scopes all HA ConfigMaps to this specific session
+    # cluster, preventing collisions if a second Flink cluster is deployed.
     high-availability.kubernetes.cluster-id: flink-session-cluster
-    
+
     # Checkpointing configuration
+    # 60-second checkpoint interval balances recovery time (shorter = faster
+    # recovery) against throughput overhead. At 1-minute intervals the
+    # maximum data loss window equals 1 minute.
     execution.checkpointing.interval: 60000
+    # 5-minute timeout prevents a slow checkpoint from blocking the next
+    # one indefinitely; if a checkpoint exceeds this, it is aborted and
+    # retried.
     execution.checkpointing.timeout: 300000
+    # One concurrent checkpoint at a time prevents checkpoint storms that
+    # could saturate network bandwidth during high-throughput periods.
     execution.checkpointing.max-concurrent-checkpoints: 1
+    # RETAIN_ON_CANCELLATION keeps the last checkpoint when a job is
+    # cancelled manually, enabling a clean resume from the same point.
     execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+    # RocksDB is chosen over the default heap backend because it spills
+    # state to disk, supporting very large state (e.g. keyed aggregations
+    # over millions of entities) without exhausting JVM heap.
     state.backend: rocksdb
     state.checkpoints.dir: s3://afriflow-flink-checkpoints/
     state.savepoints.dir: s3://afriflow-flink-savepoints/
+    # Incremental checkpoints write only the delta since the last checkpoint,
+    # dramatically reducing checkpoint size and S3 write cost for large
+    # RocksDB state.
     state.backend.incremental: true
-    
+
     # Restart strategy
+    # Fixed-delay with 3 attempts gives transient failures (e.g. a Kafka
+    # broker restart) time to resolve before the job is declared failed.
     restart-strategy: fixed-delay
     restart-strategy.fixed-delay.attempts: 3
+    # 10-second delay between attempts avoids tight retry loops that could
+    # flood downstream systems during a prolonged outage.
     restart-strategy.fixed-delay.delay: 10s
-    
+
     # Metrics & Monitoring (Prometheus)
+    # PrometheusReporter exposes metrics on port 9249 so the Prometheus
+    # ServiceMonitor can scrape them without any push-gateway intermediary.
     metrics.reporter.prom.class: org.apache.flink.metrics.prometheus.PrometheusReporter
     metrics.reporter.prom.port: 9249
+    # "/" delimiter aligns metric names with Prometheus naming conventions
+    # (slashes are replaced with underscores by the reporter).
     metrics.scope.delimiter: /
+    # Keep only the most recent latency measurement to minimise cardinality
+    # and memory overhead in the metrics subsystem.
     metrics.latency.history-size: 1
+    # Report latency at 60-second intervals, matching the checkpoint interval
+    # so operators can correlate checkpoint delays with latency spikes.
     metrics.latency.interval: 60000
-    
+
     # Network & Buffer configuration
+    # 32 KiB segments are the default and work well for most record sizes
+    # in AfriFlow (JSON events typically 1-10 KB).
     taskmanager.memory.segment-size: 32kb
     taskmanager.network.numberOfBuffers: 10
+    # 8 floating buffers per gate reduce backpressure propagation by
+    # allowing a slow downstream operator to absorb short bursts without
+    # stalling the upstream immediately.
     taskmanager.network.memory.floating-buffers-per-gate: 8
+    # Backoff prevents buffer request hot-loops; starts at 100 ms and
+    # caps at 10 s to cap total wait time.
     taskmanager.network.memory.request-backoff.initial: 100
     taskmanager.network.memory.request-backoff.max: 10000
-    
+
     # Security
+    # Internal TLS is disabled because all Flink components run within the
+    # same Kubernetes namespace and are protected by NetworkPolicy. Enabling
+    # it would require certificate rotation and add latency.
     ssl.internal.enabled: false
     ssl.rest.enabled: false
-    
+
     # Web UI
+    # Bind REST to all interfaces so the Kubernetes Service can forward
+    # requests to any pod IP.
     rest.address: 0.0.0.0
     rest.port: 8081
+    # Allow job submission and cancellation via the Web UI for operational
+    # convenience during development and incident response.
     web.submit.enable: true
     web.cancel.enable: true
+    # 3-second UI refresh keeps the dashboard near real-time without
+    # overloading the JobManager with polling requests.
     web.refresh-interval: 3000
-    
+
     # Parallelism defaults
+    # Default parallelism of 4 matches the 4 task slots per TaskManager,
+    # so a job with default settings fills one TM completely. Overlay
+    # manifests can override this per country-pod.
     parallelism.default: 4
-    
+
     # Time characteristic
+    # STREAMING mode means all jobs run as unbounded datastreams by default.
+    # Batch jobs can still be submitted but will run in a compatibility layer.
     execution.runtime-mode: STREAMING
 
 ---
+# ---- Resource 2: JobManager Service ---------------------------------------
+# A ClusterIP Service gives the JobManager a stable DNS name
+# (flink-jobmanager.afriflow.svc.cluster.local) so that TaskManagers and
+# Flink clients can always reach the JobManager regardless of which node
+# it is scheduled on.
 apiVersion: v1
 kind: Service
 metadata:
@@ -97,34 +195,53 @@ metadata:
     app.kubernetes.io/name: flink
     app.kubernetes.io/component: jobmanager
   annotations:
+    # These annotations instruct a Prometheus operator or kube-state-metrics
+    # scraper to collect metrics from port 9249 on the "/" path.
     prometheus.io/scrape: "true"
     prometheus.io/port: "9249"
     prometheus.io/path: "/"
 spec:
+  # ClusterIP (the default) restricts access to inside the cluster. The
+  # JobManager does not need to be reachable from outside the VPC.
   type: ClusterIP
   ports:
+    # RPC port used by TaskManagers to register with the JobManager and
+    # receive task deployments.
     - name: rpc
       port: 6123
       targetPort: rpc
       protocol: TCP
+    # Blob server distributes job JARs and task class files to TaskManagers
+    # so they do not need to pull from an external artifact store.
     - name: blob-server
       port: 6124
       targetPort: blob-server
       protocol: TCP
+    # Flink Web UI and REST API — used for job submission, monitoring, and
+    # savepoint operations.
     - name: web-ui
       port: 8081
       targetPort: web-ui
       protocol: TCP
+    # Prometheus metrics endpoint exposed by the JMX exporter sidecar.
     - name: metrics
       port: 9249
       targetPort: metrics
       protocol: TCP
+  # Routes traffic only to pods labelled as the jobmanager component,
+  # preventing accidental routing to TaskManager pods.
   selector:
     app: flink
     app.kubernetes.io/name: flink
     app.kubernetes.io/component: jobmanager
 
 ---
+# ---- Resource 3: TaskManager Service (Headless) ---------------------------
+# A headless Service (clusterIP: None) creates individual DNS A records for
+# each TaskManager pod, enabling the JobManager to address TaskManagers
+# directly for data-plane communication. This is preferable to a regular
+# ClusterIP Service because Flink uses direct pod-to-pod connections for
+# shuffle data, bypassing the iptables proxy overhead.
 apiVersion: v1
 kind: Service
 metadata:
@@ -140,12 +257,17 @@ metadata:
     prometheus.io/path: "/"
 spec:
   type: ClusterIP
+  # None makes this a headless Service: no virtual IP is assigned and DNS
+  # returns the individual pod IPs directly.
   clusterIP: None
   ports:
+    # Data port used for inter-TaskManager record exchange during shuffle
+    # operations (e.g. keyBy, join, rebalance).
     - name: data
       port: 6121
       targetPort: data
       protocol: TCP
+    # Prometheus metrics from the JMX exporter sidecar on each TaskManager.
     - name: metrics
       port: 9249
       targetPort: metrics
@@ -156,6 +278,12 @@ spec:
     app.kubernetes.io/component: taskmanager
 
 ---
+# ---- Resource 4: JobManager Deployment ------------------------------------
+# The JobManager is the cluster coordinator: it schedules tasks, coordinates
+# checkpoints, and serves the Web UI. A single replica is sufficient because
+# Kubernetes HA (configured above) can restart it and restore state from S3
+# within seconds. Running two replicas would require Flink's active/standby
+# HA, which is more complex and not needed at AfriFlow's scale.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -166,6 +294,8 @@ metadata:
     app.kubernetes.io/name: flink
     app.kubernetes.io/component: jobmanager
 spec:
+  # One active JobManager; HA handles failover rather than running a hot
+  # standby, keeping resource consumption low.
   replicas: 1
   selector:
     matchLabels:
@@ -179,21 +309,35 @@ spec:
         app.kubernetes.io/name: flink
         app.kubernetes.io/component: jobmanager
       annotations:
+        # Pod-level annotations ensure Prometheus scrapes the JMX exporter
+        # sidecar even if no ServiceMonitor CRD is installed.
         prometheus.io/scrape: "true"
         prometheus.io/port: "9249"
         prometheus.io/path: "/"
     spec:
+      # Dedicated ServiceAccount grants the JobManager permission to create
+      # and delete ConfigMaps for HA state and to manage task pods.
       serviceAccountName: flink-service-account
       securityContext:
+        # UID/GID 9999 is the non-root user baked into the official Flink
+        # Docker image. Running as non-root satisfies CIS Kubernetes Benchmark
+        # recommendations and prevents container escape privilege escalation.
         fsGroup: 9999
         runAsUser: 9999
         runAsGroup: 9999
       containers:
         # Flink JobManager
         - name: jobmanager
+          # Flink 1.18.0 is the LTS release that supports Kubernetes HA,
+          # RocksDB incremental checkpoints, and the unified Source/Sink API
+          # used by AfriFlow's domain connectors.
           image: flink:1.18.0
+          # IfNotPresent avoids unnecessary pulls on every pod restart while
+          # still pulling when the image is not cached on the node.
           imagePullPolicy: IfNotPresent
           args:
+            # "jobmanager" tells the entrypoint script to start the
+            # JobManager process (as opposed to "taskmanager").
             - jobmanager
           ports:
             - name: rpc
@@ -206,50 +350,86 @@ spec:
               containerPort: 8081
               protocol: TCP
           env:
+            # FLINK_PROPERTIES overrides flink-conf.yaml entries at runtime,
+            # setting the RPC address to the Service DNS name so the JobManager
+            # advertises the correct hostname to TaskManagers.
             - name: FLINK_PROPERTIES
               value: |
                 jobmanager.rpc.address: flink-jobmanager
           resources:
             requests:
+              # 1 CPU core requested guarantees the JobManager is scheduled on
+              # a node with spare capacity; it bursts to 2 cores during
+              # checkpoint coordination spikes.
               cpu: "1"
               memory: "2Gi"
             limits:
+              # 2 CPU / 4 GiB limits cap runaway resource consumption. The
+              # memory limit must exceed jobmanager.memory.process.size (2048m)
+              # to account for JVM overhead and metaspace.
               cpu: "2"
               memory: "4Gi"
           volumeMounts:
+            # Mount the ConfigMap as flink-conf.yaml so that the Flink
+            # entrypoint reads the centralised configuration.
             - name: flink-config
               mountPath: /opt/flink/conf/flink-conf.yaml
               subPath: flink-conf.yaml
+            # General-purpose storage for JARs, plugins, and temp files.
             - name: flink-storage
               mountPath: /var/flink/storage
+            # Local checkpoint staging area; actual durability is provided
+            # by the S3 backend configured in flink-conf.yaml.
             - name: flink-checkpoints
               mountPath: /var/flink/checkpoints
+            # Savepoint staging area for manually-triggered savepoints.
             - name: flink-savepoints
               mountPath: /var/flink/savepoints
           livenessProbe:
+            # The /overview endpoint returns HTTP 200 only when the
+            # JobManager is fully initialised and accepting connections.
             httpGet:
               path: /overview
               port: web-ui
+            # 60-second initial delay gives the JVM time to start and
+            # load the Flink runtime before the first probe fires.
             initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 10
+            # 5 consecutive failures (2.5 minutes) before restart, giving
+            # the JobManager time to recover from transient GC pauses.
             failureThreshold: 5
           readinessProbe:
             httpGet:
               path: /overview
               port: web-ui
+            # 30-second initial delay: shorter than liveness because we
+            # only need the HTTP server to be accepting connections, not
+            # full job recovery.
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
           securityContext:
+            # Prevent the container from gaining additional Linux capabilities
+            # via setuid/setgid binaries.
             allowPrivilegeEscalation: false
+            # The Flink JobManager writes to /tmp and checkpoint dirs, so a
+            # fully read-only rootfs is not possible here. Volumes provide
+            # the writable paths explicitly.
             readOnlyRootFilesystem: false
             capabilities:
+              # Drop all capabilities and grant none back — the JobManager
+              # only needs standard user-space networking, not raw sockets
+              # or filesystem capabilities.
               drop:
                 - ALL
-        
+
         # Prometheus JMX Exporter Sidecar
+        # Runs alongside the JobManager to translate JMX MBeans into the
+        # Prometheus text format. Using a sidecar rather than the built-in
+        # PrometheusReporter allows independent version upgrades and avoids
+        # adding classpath dependencies to the main Flink image.
         - name: jmx-exporter
           image: prom/jmx-exporter:0.18.0
           imagePullPolicy: IfNotPresent
@@ -258,10 +438,15 @@ spec:
               containerPort: 9249
               protocol: TCP
           args:
+            # Port the HTTP server listens on.
             - "9249"
+            # Path to the rule config that maps JMX MBean patterns to
+            # Prometheus metric names (defined in jmx-exporter-config below).
             - /etc/jmx-exporter/config.yml
           resources:
             requests:
+              # The JMX exporter is a lightweight Java process; 100m CPU
+              # and 128 MiB are sufficient for normal operation.
               cpu: "100m"
               memory: "128Mi"
             limits:
@@ -272,32 +457,45 @@ spec:
               mountPath: /etc/jmx-exporter
           securityContext:
             allowPrivilegeEscalation: false
+            # The JMX exporter only reads its config file and writes to
+            # stdout, so a read-only rootfs is safe here.
             readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
-      
+
       volumes:
+        # Expose the flink-conf.yaml ConfigMap as a file in the container.
         - name: flink-config
           configMap:
             name: flink-config
+            # 0644 allows the Flink process (UID 9999) to read but not
+            # write the config, preventing runtime config mutation.
             defaultMode: 0644
+        # PVC for general job storage (JARs, plugins, temp data).
         - name: flink-storage
           persistentVolumeClaim:
             claimName: flink-storage-pvc
+        # PVC for checkpoint staging area (ephemeral; S3 is the durable store).
         - name: flink-checkpoints
           persistentVolumeClaim:
             claimName: flink-checkpoints-pvc
+        # PVC for savepoint staging area.
         - name: flink-savepoints
           persistentVolumeClaim:
             claimName: flink-savepoints-pvc
+        # Mount the JMX exporter rule config into the sidecar container.
         - name: jmx-config
           configMap:
             name: jmx-exporter-config
             defaultMode: 0644
-      
+
       affinity:
         podAntiAffinity:
+          # "preferred" (soft) anti-affinity: Kubernetes will try to place
+          # the JobManager on a different node from other JobManager pods,
+          # but will still schedule it if no other node is available. This
+          # avoids a scheduling deadlock when the cluster has only one node.
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
               podAffinityTerm:
@@ -306,20 +504,35 @@ spec:
                     app: flink
                     app.kubernetes.io/name: flink
                     app.kubernetes.io/component: jobmanager
+                # Node-level topology key means pods are spread across
+                # physical hosts, not just availability zones.
                 topologyKey: kubernetes.io/hostname
-      
+
+      # Target nodes labelled for streaming workloads. These nodes are
+      # provisioned with higher network bandwidth and faster NVMe SSDs
+      # optimised for Flink's shuffle and checkpoint I/O patterns.
       nodeSelector:
         afriflow/node-type: streaming
-      
+
       tolerations:
+        # Allow scheduling on nodes tainted with "workload=streaming:NoSchedule"
+        # so that only Flink (and other streaming) pods land on these nodes,
+        # preventing batch or web workloads from consuming their resources.
         - key: "workload"
           operator: "Equal"
           value: "streaming"
           effect: "NoSchedule"
-      
+
+      # 60 seconds gives in-flight checkpoints time to complete before the
+      # pod is forcefully terminated, reducing recovery time after a restart.
       terminationGracePeriodSeconds: 60
 
 ---
+# ---- Resource 5: TaskManager Deployment -----------------------------------
+# TaskManagers are the worker nodes that execute the actual stream processing
+# operators. Two replicas provide 8 total task slots (2 TMs × 4 slots each),
+# enough to run AfriFlow's current set of domain jobs concurrently without
+# contention. Replica count is overridden per country-pod in the overlays.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -330,6 +543,9 @@ metadata:
     app.kubernetes.io/name: flink
     app.kubernetes.io/component: taskmanager
 spec:
+  # Two TaskManagers give 8 task slots total. Each AfriFlow domain job
+  # (forex, PBB, insurance, cell) uses up to 2 slots, so 4 domains can
+  # run concurrently without slot contention.
   replicas: 2
   selector:
     matchLabels:
@@ -353,6 +569,10 @@ spec:
         runAsUser: 9999
         runAsGroup: 9999
       initContainers:
+        # Init container blocks TaskManager startup until the JobManager's
+        # RPC port is reachable. Without this guard a TaskManager may exhaust
+        # its connection retry budget before the JobManager is ready,
+        # requiring a manual pod restart.
         - name: wait-for-jobmanager
           image: busybox:1.36
           imagePullPolicy: IfNotPresent
@@ -368,6 +588,8 @@ spec:
               echo "JobManager is ready!"
           resources:
             requests:
+              # Minimal resources for the init container — it only runs
+              # netcat in a loop and exits as soon as the port is open.
               cpu: "50m"
               memory: "64Mi"
             limits:
@@ -379,18 +601,21 @@ spec:
             capabilities:
               drop:
                 - ALL
-      
+
       containers:
         # Flink TaskManager
         - name: taskmanager
           image: flink:1.18.0
           imagePullPolicy: IfNotPresent
           args:
+            # "taskmanager" starts the TaskManager process.
             - taskmanager
           ports:
+            # Data port for inter-TaskManager shuffle traffic.
             - name: data
               containerPort: 6121
               protocol: TCP
+            # Prometheus metrics from the JMX exporter sidecar.
             - name: metrics
               containerPort: 9249
               protocol: TCP
@@ -398,13 +623,24 @@ spec:
             - name: FLINK_PROPERTIES
               value: |
                 jobmanager.rpc.address: flink-jobmanager
+                # Advertise the pod IP so the JobManager can route data-plane
+                # traffic directly to this TaskManager without going through
+                # the headless Service.
                 taskmanager.host: $(POD_IP)
+            # Downward API injects the pod's own IP at runtime. This is
+            # necessary because the pod IP is not known at manifest authoring
+            # time.
             - name: POD_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
           resources:
             requests:
+              # TaskManagers are CPU and memory intensive: 2 cores and 4 GiB
+              # match the taskmanager.memory.process.size setting in flink-conf.
+              # Setting requests == limits (burstable Guaranteed QoS) prevents
+              # the kernel OOM killer from evicting TaskManagers during memory
+              # pressure, which would cause job restarts.
               cpu: "2"
               memory: "4Gi"
             limits:
@@ -417,8 +653,12 @@ spec:
             - name: flink-storage
               mountPath: /var/flink/storage
           livenessProbe:
+            # TaskManagers do not expose an HTTP health endpoint, so a TCP
+            # socket check on the data port is used instead.
             tcpSocket:
               port: data
+            # 60-second delay: RocksDB state backend may take 30-60 seconds
+            # to restore a large state on restart before accepting data.
             initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 10
@@ -432,12 +672,14 @@ spec:
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
+            # TaskManagers write to /tmp and the checkpoint staging path,
+            # so read-only rootfs cannot be enabled here.
             readOnlyRootFilesystem: false
             capabilities:
               drop:
                 - ALL
-        
-        # Prometheus JMX Exporter Sidecar
+
+        # Prometheus JMX Exporter Sidecar (same rationale as JobManager above)
         - name: jmx-exporter
           image: prom/jmx-exporter:0.18.0
           imagePullPolicy: IfNotPresent
@@ -464,12 +706,15 @@ spec:
             capabilities:
               drop:
                 - ALL
-      
+
       volumes:
         - name: flink-config
           configMap:
             name: flink-config
             defaultMode: 0644
+        # TaskManagers share the same flink-storage-pvc as the JobManager
+        # (ReadWriteMany) so that JARs distributed by the blob server are
+        # accessible to all pods without a separate copy per TM.
         - name: flink-storage
           persistentVolumeClaim:
             claimName: flink-storage-pvc
@@ -477,9 +722,12 @@ spec:
           configMap:
             name: jmx-exporter-config
             defaultMode: 0644
-      
+
       affinity:
         podAntiAffinity:
+          # Soft anti-affinity spreads TaskManagers across different nodes
+          # so that a single node failure only takes down one TM, halving
+          # the blast radius rather than stopping all processing.
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
               podAffinityTerm:
@@ -489,19 +737,25 @@ spec:
                     app.kubernetes.io/name: flink
                     app.kubernetes.io/component: taskmanager
                 topologyKey: kubernetes.io/hostname
-      
+
       nodeSelector:
         afriflow/node-type: streaming
-      
+
       tolerations:
         - key: "workload"
           operator: "Equal"
           value: "streaming"
           effect: "NoSchedule"
-      
+
+      # 60 seconds allows the TaskManager to flush in-progress network
+      # buffers and complete any running checkpoint segment before shutdown.
       terminationGracePeriodSeconds: 60
 
 ---
+# ---- Resource 6: JobManager PodDisruptionBudget ---------------------------
+# Guarantees at least 1 JobManager pod is always available during voluntary
+# disruptions (node drain, rolling OS updates). Without a PDB a node drain
+# could delete the only JobManager pod, causing all running jobs to fail.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -512,6 +766,8 @@ metadata:
     app.kubernetes.io/name: flink
     app.kubernetes.io/component: jobmanager
 spec:
+  # With replicas=1, minAvailable=1 means the cluster will refuse to drain
+  # the node hosting the JobManager until it has been rescheduled elsewhere.
   minAvailable: 1
   selector:
     matchLabels:
@@ -520,6 +776,10 @@ spec:
       app.kubernetes.io/component: jobmanager
 
 ---
+# ---- Resource 7: TaskManager PodDisruptionBudget --------------------------
+# Ensures at least 1 TaskManager remains running during voluntary disruptions,
+# preserving partial processing capacity while one TM is being restarted or
+# migrated.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -530,6 +790,8 @@ metadata:
     app.kubernetes.io/name: flink
     app.kubernetes.io/component: taskmanager
 spec:
+  # With replicas=2, minAvailable=1 allows one TM to be evicted at a time
+  # (e.g. during a rolling node upgrade) while the other continues processing.
   minAvailable: 1
   selector:
     matchLabels:
@@ -538,6 +800,9 @@ spec:
       app.kubernetes.io/component: taskmanager
 
 ---
+# ---- Resource 8: flink-storage PVC ----------------------------------------
+# Shared ReadWriteMany volume for JARs, plugins, and staging data accessed
+# by both the JobManager and all TaskManagers simultaneously.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -547,14 +812,26 @@ metadata:
     app: flink
     app.kubernetes.io/name: flink
 spec:
+  # ReadWriteMany is required because multiple pods (JobManager + 2 TMs)
+  # mount this volume concurrently. This mode requires an NFS or EFS-backed
+  # StorageClass.
   accessModes:
     - ReadWriteMany
+  # gp3-ssd is an EBS gp3 StorageClass that delivers 3,000 IOPS baseline
+  # at lower cost than gp2. JARs and plugin files are small and infrequently
+  # written, so high IOPS is not critical here.
   storageClassName: gp3-ssd
   resources:
     requests:
+      # 50 GiB comfortably holds the Flink runtime, all domain job JARs,
+      # connector plugins, and several GB of temp data.
       storage: 50Gi
 
 ---
+# ---- Resource 9: flink-checkpoints PVC ------------------------------------
+# Dedicated volume for checkpoint staging before files are uploaded to S3.
+# Keeping checkpoints on a separate PVC prevents checkpoint I/O from
+# competing with job JARs on the flink-storage volume.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -569,9 +846,15 @@ spec:
   storageClassName: gp3-ssd
   resources:
     requests:
+      # 100 GiB accommodates large incremental RocksDB checkpoints for
+      # stateful jobs (e.g. the entity resolution aggregation) during the
+      # upload window before the S3 backend acknowledges completion.
       storage: 100Gi
 
 ---
+# ---- Resource 10: flink-savepoints PVC ------------------------------------
+# Dedicated volume for manually-triggered savepoints used for planned
+# migrations, version upgrades, and A/B testing of new job logic.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -586,9 +869,16 @@ spec:
   storageClassName: gp3-ssd
   resources:
     requests:
+      # 50 GiB is sufficient for a few generations of savepoints per job.
+      # Old savepoints should be pruned as part of the release process.
       storage: 50Gi
 
 ---
+# ---- Resource 11: JMX Exporter ConfigMap ----------------------------------
+# Defines the Prometheus metric extraction rules for Flink JMX MBeans.
+# The rules use regex patterns to extract job, task, and subtask labels
+# from MBean object names so that Prometheus can break down metrics by
+# Flink job and operator.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -598,15 +888,22 @@ metadata:
     app: flink
 data:
   config.yml: |
+    # Convert metric names and label names to lowercase for consistency
+    # with Prometheus naming conventions (which are case-sensitive but
+    # conventionally lowercase).
     lowercaseOutputName: true
     lowercaseOutputLabelNames: true
     rules:
+      # Capture overall JobManager status metrics (e.g. numRunningJobs).
       - pattern: 'flink<jobmanager_status>(.*):'
         name: flink_jobmanager_status
         type: GAUGE
+      # Capture overall TaskManager status metrics (e.g. numRegisteredTaskManagers).
       - pattern: 'flink<taskmanager_status>(.*):'
         name: flink_taskmanager_status
         type: GAUGE
+      # Per-subtask metrics (most granular): includes job name, task index,
+      # and operator name as labels for fine-grained performance analysis.
       - pattern: 'flink<job=(.*), subtask=(.*), task=(.*)> (.*)'
         name: flink_task_$4
         type: GAUGE
@@ -614,17 +911,24 @@ data:
           job: "$1"
           subtask: "$2"
           task: "$3"
+      # Per-task metrics (intermediate granularity): job + operator.
       - pattern: 'flink<job=(.*), task=(.*)> (.*)'
         name: flink_job_$3
         type: GAUGE
         labels:
           job: "$1"
           task: "$2"
+      # Catch-all for any remaining Flink MBeans not matched by rules above.
       - pattern: 'flink<(.*)> (.*)'
         name: flink_$2
         type: GAUGE
 
 ---
+# ---- Resource 12: Flink ServiceAccount ------------------------------------
+# Dedicated ServiceAccount isolates the Flink cluster's API server
+# permissions from other workloads in the namespace. The Role below
+# grants only what Flink needs for HA ConfigMap management and task
+# pod lifecycle operations.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -635,6 +939,10 @@ metadata:
     app.kubernetes.io/name: flink
 
 ---
+# ---- Resource 13: Flink Role (namespace-scoped RBAC) ----------------------
+# Namespace-scoped Role (not ClusterRole) follows the principle of least
+# privilege: Flink only needs to manage resources within the afriflow
+# namespace, not cluster-wide.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -645,13 +953,23 @@ metadata:
     app.kubernetes.io/name: flink
 rules:
   - apiGroups: [""]
+    # pods: JobManager creates/deletes task pods in Application Mode and
+    #   monitors pod state for HA failover detection.
+    # services: Required to create per-job REST services in Application Mode.
+    # configmaps: Used by Kubernetes HA to store job graphs and checkpoint
+    #   pointers as ConfigMap entries in the afriflow namespace.
     resources: ["pods", "services", "configmaps"]
     verbs: ["get", "list", "watch", "create", "update", "delete"]
   - apiGroups: ["apps"]
+    # Deployments/StatefulSets: needed when Flink manages its own TM scaling
+    # or when the operator reconciles the flink-taskmanager Deployment.
     resources: ["deployments", "statefulsets"]
     verbs: ["get", "list", "watch", "create", "update", "delete"]
 
 ---
+# ---- Resource 14: Flink RoleBinding ---------------------------------------
+# Binds the Role above to the flink-service-account so that pods using
+# that ServiceAccount inherit the permissions.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -667,4 +985,5 @@ subjects:
 roleRef:
   kind: Role
   name: flink-role
+  # rbac.authorization.k8s.io is the only valid apiGroup for Role references.
   apiGroup: rbac.authorization.k8s.io

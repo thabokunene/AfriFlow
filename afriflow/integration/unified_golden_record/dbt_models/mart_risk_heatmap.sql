@@ -1,6 +1,17 @@
+-- =============================================================================
+-- @file mart_risk_heatmap.sql
+-- @description Materialises a comprehensive per-client risk heatmap combining
+--     four risk dimensions: attrition (inactivity + CIB decline + SIM shrinkage),
+--     FX exposure (unhedged positions + parallel market), insurance coverage
+--     gaps, and concentration risk. Produces a composite score (0–100),
+--     a risk_level classification, and a recommended RM action.
+-- @author Thabo Kunene
+-- @created 2026-03-18
+-- =============================================================================
+
 {{
     config(
-        materialized='table',
+        materialized='table',          -- Full refresh on each dbt run
         tags=['integration', 'risk', 'heatmap']
     )
 }}
@@ -19,10 +30,15 @@
     This table powers risk dashboards and early warning systems.
 */
 
+-- ── CTE: unified_clients ──────────────────────────────────────────────────────
+-- Base golden record table; provides all domain metrics and activity dates
 WITH unified_clients AS (
     SELECT * FROM {{ ref('mart_unified_client') }}
 ),
 
+-- ── CTE: attrition_signals ────────────────────────────────────────────────────
+-- Score three independent attrition indicators: inactivity, CIB volume decline,
+-- and SIM base contraction. Higher scores = stronger attrition signal.
 -- Attrition signals
 attrition_signals AS (
     SELECT
@@ -47,6 +63,9 @@ attrition_signals AS (
     FROM {{ ref('mart_unified_client') }}
 ),
 
+-- ── CTE: fx_exposure ──────────────────────────────────────────────────────────
+-- Aggregate unhedged FX volumes, currency list, and parallel market flag
+-- from mart_forex_exposure; only include records with actual exposure.
 -- FX exposure details
 fx_exposure AS (
     SELECT
@@ -61,6 +80,9 @@ fx_exposure AS (
     GROUP BY golden_id
 ),
 
+-- ── CTE: insurance_gaps ───────────────────────────────────────────────────────
+-- Aggregate total coverage gap value, uncovered countries, and lapsing policy count
+-- from mart_policy_analytics; filter to only records with gaps or lapsing policies.
 -- Insurance coverage gaps
 insurance_gaps AS (
     SELECT
@@ -73,6 +95,9 @@ insurance_gaps AS (
     GROUP BY golden_id
 ),
 
+-- ── CTE: combined ─────────────────────────────────────────────────────────────
+-- LEFT JOIN all risk component CTEs onto unified_clients; COALESCE ensures
+-- clients with no signals in a risk dimension default to 0 (no risk).
 -- Combine all risk factors
 combined AS (
     SELECT
@@ -116,12 +141,15 @@ combined AS (
     LEFT JOIN insurance_gaps ins ON uc.golden_id = ins.golden_id
 ),
 
+-- ── CTE: with_scores ──────────────────────────────────────────────────────────
+-- Compute four independent risk dimension scores (each 0–100) from the combined
+-- inputs. LEAST(100, ...) caps the attrition score to prevent overflow.
 -- Calculate composite risk scores
 with_scores AS (
     SELECT
         *,
 
-        -- Attrition risk score (0-100)
+        -- Attrition risk score (0–100): sum of three signal components, capped at 100
         LEAST(100,
             inactivity_score +
             cib_decline_score +
@@ -129,9 +157,9 @@ with_scores AS (
             CASE WHEN domains_active = 1 THEN 20 ELSE 0 END
         ) AS attrition_risk_score,
 
-        -- FX exposure risk score
+        -- FX exposure risk score: tiered by unhedged ZAR value + parallel market penalty
         CASE
-            WHEN total_unhedged_zar > 10000000 THEN 40
+            WHEN total_unhedged_zar > 10000000 THEN 40  -- >R10M unhedged: high risk
             WHEN total_unhedged_zar > 5000000 THEN 30
             WHEN total_unhedged_zar > 1000000 THEN 20
             WHEN total_unhedged_zar > 0 THEN 10
@@ -141,9 +169,9 @@ with_scores AS (
         CASE WHEN highest_exposure_value > 5000000 THEN 10 ELSE 0 END
         AS fx_risk_score,
 
-        -- Insurance risk score
+        -- Insurance risk score: gap value tier + lapsing policy penalty
         CASE
-            WHEN total_coverage_gap_zar > 5000000 THEN 35
+            WHEN total_coverage_gap_zar > 5000000 THEN 35  -- >R5M coverage gap: high risk
             WHEN total_coverage_gap_zar > 1000000 THEN 25
             WHEN total_coverage_gap_zar > 0 THEN 15
             ELSE 0
@@ -155,9 +183,10 @@ with_scores AS (
         END
         AS insurance_risk_score,
 
-        -- Concentration risk (based on single corridor/country dependency)
+        -- Concentration risk: flags single-corridor dependency, single-domain presence,
+        -- and high PBB dormancy as proxies for over-concentration.
         CASE
-            WHEN cib_new_countries_90d = 0 AND cib_payment_count_90d > 10 THEN 25
+            WHEN cib_new_countries_90d = 0 AND cib_payment_count_90d > 10 THEN 25  -- All payments on one corridor
             WHEN domains_active = 1 THEN 20
             WHEN pbb_dormant_pct > 50 THEN 15
             ELSE 0
@@ -166,12 +195,17 @@ with_scores AS (
     FROM combined
 ),
 
+-- ── CTE: with_final ───────────────────────────────────────────────────────────
+-- Combine the four dimension scores into a weighted composite, classify the
+-- overall risk level, identify the primary risk type, and generate the
+-- recommended RM action string.
 -- Final risk calculation
 with_final AS (
     SELECT
         *,
 
-        -- Composite risk score (weighted average)
+        -- Composite risk score (0–100): weighted average of four dimensions
+        -- Weights: attrition 30%, FX 25%, insurance 25%, concentration 20%
         ROUND(
             (attrition_risk_score * 0.30 +
              fx_risk_score * 0.25 +
@@ -179,7 +213,8 @@ with_final AS (
              concentration_risk_score * 0.20), 2
         ) AS composite_risk_score,
 
-        -- Risk level classification
+        -- Risk level: threshold-based classification of the composite score
+        -- critical >= 60, high >= 40, medium >= 20, low < 20
         CASE
             WHEN (attrition_risk_score * 0.30 + fx_risk_score * 0.25 +
                   insurance_risk_score * 0.25 + concentration_risk_score * 0.20) >= 60 THEN 'critical'
@@ -190,7 +225,8 @@ with_final AS (
             ELSE 'low'
         END AS risk_level,
 
-        -- Primary risk type
+        -- Primary risk type: whichever dimension has the highest individual score
+        -- drives the recommended action phrasing for the RM
         CASE
             WHEN attrition_risk_score >= GREATEST(fx_risk_score, insurance_risk_score, concentration_risk_score)
             THEN 'attrition'
@@ -210,7 +246,8 @@ with_final AS (
             ELSE 'Regular relationship review'
         END AS recommended_action,
 
-        -- Attrition signals summary
+        -- Attrition signals summary: concatenate which sub-signals are active
+        -- for the RM briefing alert message
         CASE
             WHEN inactivity_score > 0 OR cib_decline_score > 0 OR sim_decline_score > 0
             THEN CONCAT_WS('; ',
@@ -266,24 +303,25 @@ SELECT
     0.5 AS supplier_concentration,
     CASE WHEN cib_new_countries_90d = 0 AND cib_payment_count_90d > 5 THEN TRUE ELSE FALSE END AS single_corridor_dependency,
 
-    -- Sovereign risk (placeholder)
+    -- Sovereign risk: placeholder for future government-revenue-dependency scoring
     0.0 AS government_revenue_pct,
     'stable' AS government_payment_health,
 
-    -- Currency event vulnerability
+    -- Currency event vulnerability: maps directly to the largest unhedged position
     total_unhedged_zar AS currency_event_exposure_zar,
-    highest_exposure_currency AS most_vulnerable_currency,
+    highest_exposure_currency AS most_vulnerable_currency,  -- Currency with highest single-trade exposure
 
-    -- Overall risk
-    composite_risk_score,
-    risk_level,
-    primary_risk_type,
-    recommended_action,
+    -- Composite risk output
+    composite_risk_score,   -- Weighted score (0–100)
+    risk_level,             -- 'critical' / 'high' / 'medium' / 'low'
+    primary_risk_type,      -- Dominant risk dimension driving the composite score
+    recommended_action,     -- RM action string for briefing and task generation
 
     -- Metadata
     '{{ invocation_id }}' AS dbt_run_id,
     CURRENT_DATE AS snapshot_date
 
 FROM with_final
+-- Only include clients with at least one active risk signal; zero-risk clients are clean
 WHERE composite_risk_score > 0 OR total_unhedged_zar > 0 OR total_coverage_gap_zar > 0
-ORDER BY composite_risk_score DESC
+ORDER BY composite_risk_score DESC  -- Highest-risk clients surfaced first in RM dashboard

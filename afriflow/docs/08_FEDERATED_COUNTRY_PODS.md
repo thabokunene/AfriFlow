@@ -1,4 +1,10 @@
-﻿# 08 Federated Country Pods
+﻿<!--
+@file 08_FEDERATED_COUNTRY_PODS.md
+@description Federated architecture responsibilities and data residency model by country pod
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 08 Federated Country Pods
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

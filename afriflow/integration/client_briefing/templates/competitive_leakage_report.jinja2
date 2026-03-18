@@ -1,0 +1,82 @@
+{#
+  @file competitive_leakage_report.jinja2
+  @description Renders a competitive wallet-share leakage report showing where
+               a client's revenue is likely flowing to competitor banks or
+               fintechs instead of through AfriFlow's platform.
+
+               Each leakage item is a data-shadow signal derived from the
+               DataShadowModel — a corridor or product gap where we expected
+               to see activity but observed none.
+
+               The report is intended for internal RM preparation and ExCo
+               pipeline reviews, not for sharing with the client directly.
+
+               Expected context variables:
+                 client_name    — str: canonical client name
+                 report_date    — str: ISO date of the reporting period
+                 leakage_items  — list of leakage dicts, each containing:
+                                    domain, country, description,
+                                    estimated_revenue_gap_zar, urgency,
+                                    recommended_action
+                 total_leakage_zar — float: sum of all estimated gaps
+  @author Thabo Kunene
+  @created 2026-03-18
+#}
+
+{# ============================================================ #}
+{# SECTION: Report header                                      #}
+{# ============================================================ #}
+{{ "=" * 70 }}
+COMPETITIVE LEAKAGE REPORT: {{ client_name }}
+Report Date: {{ report_date }}
+{{ "=" * 70 }}
+
+{# ============================================================ #}
+{# SECTION: Introductory note                                  #}
+{# Helps the RM understand what the report represents.         #}
+{# ============================================================ #}
+This report identifies revenue that should flow through our platform
+but is likely going to competitors. Each item is derived from a
+cross-domain data absence (data shadow) and represents an actionable
+opportunity for the relationship team.
+
+{{ "-" * 70 }}
+
+{# ============================================================ #}
+{# SECTION: Leakage item rows                                  #}
+{# Sorted by urgency (HIGH first) in the generator layer.      #}
+{# loop.index provides a 1-based item number.                  #}
+{# ============================================================ #}
+{% for item in leakage_items %}
+{{ loop.index }}. [{{ item.urgency }}] [{{ item.domain | upper }}] {{ item.country }}
+   Gap Description  : {{ item.description }}
+   Estimated Leakage: R{{ "{:,.0f}".format(item.estimated_revenue_gap_zar) }} p.a.
+   {# -------------------------------------------------------- #}
+   {# Recommended action is the specific RM ask               #}
+   {# -------------------------------------------------------- #}
+   Recommended Action: {{ item.recommended_action }}
+   {{ "-" * 60 }}
+{% else %}
+{# Fallback: rendered if no leakage items were detected        #}
+  No competitive leakage detected for this client.
+{% endfor %}
+
+{# ============================================================ #}
+{# SECTION: Summary totals                                     #}
+{# ============================================================ #}
+{{ "=" * 70 }}
+
+{# Conditional: only show the total line if there are items to sum #}
+{% if leakage_items %}
+TOTAL ESTIMATED LEAKAGE: R{{ "{:,.0f}".format(total_leakage_zar) }} p.a.
+
+{# ------------------------------------------------------------ #}
+{# Count items by urgency so the RM can triage quickly          #}
+{# ------------------------------------------------------------ #}
+  High urgency items  : {{ leakage_items | selectattr("urgency", "equalto", "HIGH") | list | length }}
+  Medium urgency items: {{ leakage_items | selectattr("urgency", "equalto", "MEDIUM") | list | length }}
+{% else %}
+TOTAL ESTIMATED LEAKAGE: R0
+{% endif %}
+
+{{ "=" * 70 }}

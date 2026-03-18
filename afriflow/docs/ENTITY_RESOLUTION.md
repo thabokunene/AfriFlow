@@ -1,4 +1,9 @@
-<!-- docs/ENTITY_RESOLUTION.md -->
+<!--
+@file ENTITY_RESOLUTION.md
+@description Deep dive into entity resolution strategy, hierarchy, and normalization
+@author Thabo Kunene
+@created 2026-03-17
+-->
 
 # Entity Resolution Deep Dive
 

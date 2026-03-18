@@ -1,4 +1,9 @@
-<!-- docs/DATA_SHADOW_MODEL.md -->
+<!--
+@file DATA_SHADOW_MODEL.md
+@description Defines data shadow model, expectation rules, and monitoring approach
+@author Thabo Kunene
+@created 2026-03-17
+-->
 
 # AfriFlow Data Shadow Model
 

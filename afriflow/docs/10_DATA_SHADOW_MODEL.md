@@ -1,4 +1,10 @@
-﻿# 10 Data Shadow Model
+<!--
+@file 10_DATA_SHADOW_MODEL.md
+@description Data shadow model definition and audit/compliance footprint mapping approach
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 10 Data Shadow Model
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

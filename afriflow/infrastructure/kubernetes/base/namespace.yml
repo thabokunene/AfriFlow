@@ -1,8 +1,32 @@
+# =============================================================================
+# @file namespace.yml
+# @description Defines the top-level Kubernetes Namespace for all AfriFlow
+#              workloads. Every resource in this project is scoped to this
+#              namespace to ensure network, RBAC, and quota isolation from
+#              other workloads that may share the same cluster.
+# @author Thabo Kunene
+# @created 2026-03-17
+# =============================================================================
+
+# Namespace — the foundational boundary for all AfriFlow Kubernetes objects.
+# Using a dedicated namespace (rather than "default") keeps AfriFlow resources
+# isolated so that operators, quotas, and network policies can target them
+# precisely without collateral impact on other tenants.
 apiVersion: v1
 kind: Namespace
 metadata:
+  # The canonical name used in every other manifest's "namespace:" field.
+  # Keeping it lowercase and short prevents DNS resolution issues in
+  # service discovery (e.g. <svc>.<ns>.svc.cluster.local).
   name: afriflow
   labels:
+    # Mirrors the namespace name so label selectors can match on "name: afriflow"
+    # without needing a separate field lookup — useful for NetworkPolicy rules.
     name: afriflow
+    # Distinguishes this namespace as the production tier; staging or dev
+    # namespaces would carry a different value here.
     environment: production
+    # Signals to tooling (e.g. Atlantis, Flux) that Terraform owns the
+    # lifecycle of this namespace and should be the only system creating or
+    # deleting it.
     ManagedBy: Terraform

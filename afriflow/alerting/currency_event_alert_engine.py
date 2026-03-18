@@ -1,56 +1,109 @@
 """
-Currency Event Alert Engine
-
-Detects significant currency events across the 20 African
-markets in the AfriFlow coverage universe and routes alerts
-to the relevant sales and trading desks.
-
-Currency event types:
-  RATE_SHOCK         — Single-session move > 2× normal daily vol
-  REGIME_CHANGE      — Central bank announces devaluation/float
-  PARALLEL_COLLAPSE  — Parallel premium exceeds regulatory threshold
-  CORRIDOR_ILLIQUID  — Bid-ask spread > 5× normal = illiquid market
-  CARRY_OPPORTUNITY  — Interest rate differential creates carry trade
-  SWAP_POINTS_SPIKE  — Forward points spike = funding stress signal
-
-Events are enriched with:
-  - Client impact assessment (which clients hold this currency)
-  - Revenue opportunity sizing (hedging demand)
-  - Market commentary (plain-English trading desk note)
-
-Disclaimer: Portfolio project by Thabo Kunene. Not a
-Standard Bank Group product. All data is simulated.
+@file currency_event_alert_engine.py
+@description Scans African FX market data for significant currency events and
+             routes structured alerts to sales and trading desks. Detects six
+             event types — rate shocks, regime changes, parallel market
+             collapses, corridor illiquidity, carry opportunities, and swap
+             point spikes — enriched with client impact and hedging revenue
+             estimates.
+@author Thabo Kunene
+@created 2026-03-18
 """
 
-from __future__ import annotations
+# Currency Event Alert Engine
+#
+# Detects significant currency events across the 20 African
+# markets in the AfriFlow coverage universe and routes alerts
+# to the relevant sales and trading desks.
+#
+# Currency event types:
+#   RATE_SHOCK         — Single-session move > 2× normal daily vol
+#   REGIME_CHANGE      — Central bank announces devaluation/float
+#   PARALLEL_COLLAPSE  — Parallel premium exceeds regulatory threshold
+#   CORRIDOR_ILLIQUID  — Bid-ask spread > 5× normal = illiquid market
+#   CARRY_OPPORTUNITY  — Interest rate differential creates carry trade
+#   SWAP_POINTS_SPIKE  — Forward points spike = funding stress signal
+#
+# Events are enriched with:
+#   - Client impact assessment (which clients hold this currency)
+#   - Revenue opportunity sizing (hedging demand)
+#   - Market commentary (plain-English trading desk note)
+#
+# Disclaimer: Portfolio project by Thabo Kunene. Not a
+# Standard Bank Group product. All data is simulated.
 
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Dict, List, Optional
+from __future__ import annotations  # Enables PEP 563 postponed evaluation of annotations
+
+from dataclasses import dataclass, field  # Lightweight data containers with auto __init__
+from datetime import datetime             # Timestamp generation for event IDs and detection times
+from typing import Dict, List, Optional   # Type hints for clarity and IDE support
 
 
-# Normal daily vol (annualised / sqrt(252)) by currency pair
-# Used to detect rate shocks (2× normal daily move)
+# ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
+
+# Normal daily vol (annualised / sqrt(252)) by currency pair.
+# These baselines are used to identify rate shocks: a session move
+# exceeding 2× the normal daily vol triggers a RATE_SHOCK event.
+# Higher values (e.g. ZWL 3.0%) reflect chronically volatile currencies.
 _NORMAL_DAILY_VOL: Dict[str, float] = {
-    "NGAZAR": 0.010, "KESAZAR": 0.008, "GHSAZAR": 0.009,
-    "TZSZAR": 0.007, "UGXZAR": 0.009, "ZMWZAR": 0.012,
-    "ZWLZAR": 0.030, "MZEZAR": 0.011, "BWPZAR": 0.005,
-    "NADZAR": 0.004, "ETBZAR": 0.010, "CIFZAR": 0.006,
-    "XOFZAR": 0.006, "CMDZAR": 0.007, "AOAZAR": 0.015,
-    "MGAZAR": 0.013, "RWFZAR": 0.008, "MURZAR": 0.005,
-    "EGPZAR": 0.009, "MWKZAR": 0.014,
+    "NGAZAR": 0.010,   # Nigerian Naira / ZAR — moderate vol, prone to policy shocks
+    "KESAZAR": 0.008,  # Kenyan Shilling / ZAR — relatively stable
+    "GHSAZAR": 0.009,  # Ghanaian Cedi / ZAR — elevated after 2022 debt restructuring
+    "TZSZAR": 0.007,   # Tanzanian Shilling / ZAR — managed float, low vol
+    "UGXZAR": 0.009,   # Ugandan Shilling / ZAR
+    "ZMWZAR": 0.012,   # Zambian Kwacha / ZAR — commodity-linked, higher vol
+    "ZWLZAR": 0.030,   # Zimbabwe Dollar / ZAR — highest vol; chronic depreciation
+    "MZEZAR": 0.011,   # Mozambican Metical / ZAR
+    "BWPZAR": 0.005,   # Botswana Pula / ZAR — tightly managed, lowest vol
+    "NADZAR": 0.004,   # Namibian Dollar / ZAR — pegged 1:1 to ZAR, minimal spread
+    "ETBZAR": 0.010,   # Ethiopian Birr / ZAR — managed; parallel market significant
+    "CIFZAR": 0.006,   # CFA Franc (WACU) / ZAR — pegged to EUR, low vol
+    "XOFZAR": 0.006,   # CFA Franc (BCEAO) / ZAR — same peg as CIF
+    "CMDZAR": 0.007,   # Central African CFA Franc / ZAR
+    "AOAZAR": 0.015,   # Angolan Kwanza / ZAR — oil-dependent, elevated vol
+    "MGAZAR": 0.013,   # Malagasy Ariary / ZAR
+    "RWFZAR": 0.008,   # Rwandan Franc / ZAR — tightly managed by BNR
+    "MURZAR": 0.005,   # Mauritian Rupee / ZAR — stable island economy
+    "EGPZAR": 0.009,   # Egyptian Pound / ZAR — subject to IMF-driven adjustments
+    "MWKZAR": 0.014,   # Malawian Kwacha / ZAR — frequent devaluations
 }
 
-# Parallel premium regulatory thresholds
+# Parallel premium regulatory thresholds by country ISO-2 code.
+# When the parallel market rate diverges from the official rate by
+# more than this threshold, a PARALLEL_COLLAPSE event is triggered.
+# Thresholds reflect each country's enforcement tolerance.
 _PARALLEL_THRESHOLD: Dict[str, float] = {
-    "NG": 0.15, "EG": 0.12, "ZW": 0.25,
-    "ET": 0.18, "AO": 0.20,
+    "NG": 0.15,  # Nigeria: CBN tolerates up to 15% divergence before intervention
+    "EG": 0.12,  # Egypt: 12% threshold; EGP devaluation history makes this relevant
+    "ZW": 0.25,  # Zimbabwe: higher threshold due to chronic dual-rate environment
+    "ET": 0.18,  # Ethiopia: NBE controls; parallel premium a key risk signal
+    "AO": 0.20,  # Angola: BNA threshold; Kwanza historically soft
 }
 
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
 
 @dataclass
 class CurrencyEvent:
-    """A single detected currency market event."""
+    """A single detected currency market event.
+
+    :param event_id: Unique identifier, format EVT-<TYPE>-<PAIR>-<HHMM>
+    :param event_type: One of RATE_SHOCK, PARALLEL_COLLAPSE, CORRIDOR_ILLIQUID,
+                       SWAP_POINTS_SPIKE, REGIME_CHANGE, CARRY_OPPORTUNITY
+    :param currency_pair: FX pair in format 'NGN/ZAR'
+    :param country: ISO-2 country code derived from the base currency
+    :param severity: LOW / MEDIUM / HIGH / CRITICAL — drives routing priority
+    :param headline: One-line summary for push notifications and dashboards
+    :param market_commentary: Plain-English trading desk note for client calls
+    :param affected_client_count: Estimated number of clients with exposure
+    :param total_client_exposure_zar: Aggregate client exposure in ZAR
+    :param hedging_revenue_opportunity_zar: Estimated hedging fee income from event
+    :param detected_at: ISO timestamp when the event was detected
+    """
 
     event_id: str
     event_type: str
@@ -63,32 +116,48 @@ class CurrencyEvent:
     total_client_exposure_zar: float
     hedging_revenue_opportunity_zar: float
     detected_at: str = field(
-        default_factory=lambda: datetime.now().isoformat()
+        default_factory=lambda: datetime.now().isoformat()  # Defaults to current time
     )
 
 
 @dataclass
 class CurrencyEventReport:
-    """All currency events detected in the current market scan."""
+    """All currency events detected in the current market scan.
+
+    :param events: List of CurrencyEvent objects, sorted by severity (CRITICAL first)
+    :param scan_timestamp: ISO timestamp of when the scan was executed
+    :param total_market_exposure_zar: Sum of all client exposures across all events
+    """
 
     events: List[CurrencyEvent]
     scan_timestamp: str = field(
-        default_factory=lambda: datetime.now().isoformat()
+        default_factory=lambda: datetime.now().isoformat()  # Records when scan ran
     )
-    total_market_exposure_zar: float = 0.0
+    total_market_exposure_zar: float = 0.0  # Aggregate ZAR exposure across all detected events
 
     @property
     def critical_events(self) -> List[CurrencyEvent]:
+        """Filter events to CRITICAL severity only — for emergency escalation."""
         return [e for e in self.events if e.severity == "CRITICAL"]
 
     @property
     def high_events(self) -> List[CurrencyEvent]:
+        """Filter events to HIGH severity — for same-day action queue."""
         return [e for e in self.events if e.severity == "HIGH"]
 
+
+# ---------------------------------------------------------------------------
+# Alert engine
+# ---------------------------------------------------------------------------
 
 class CurrencyEventAlertEngine:
     """
     Scan rate ticks and market data for currency events.
+
+    Iterates over live rate ticks, applies four detection algorithms
+    (rate shock, parallel collapse, illiquidity, swap spike), enriches
+    each event with client impact data, and returns a severity-sorted
+    CurrencyEventReport. Intended recipient: sales and trading desks.
 
     Usage::
 
@@ -107,67 +176,85 @@ class CurrencyEventAlertEngine:
         client_exposures: Optional[Dict[str, float]] = None,
     ) -> CurrencyEventReport:
         """
-        Scan market data for currency events.
+        Scan market data for currency events across all monitored pairs.
 
-        rate_ticks: list of {currency_pair, mid_rate, bid, ask,
-                              parallel_rate, swap_points_3m,
-                              annualised_vol, ...}
+        For each rate tick, four event detectors are applied in sequence.
+        Events are enriched with client exposure data and sorted by severity.
+
+        :param rate_ticks: List of dicts with keys: currency_pair, mid_rate, bid_rate,
+                           ask_rate, parallel_rate, swap_points_3m, annualised_vol
+        :param prior_ticks: Previous scan's rate ticks for computing intraday moves
+        :param client_exposures: Dict mapping currency_pair → aggregate ZAR exposure
+        :return: CurrencyEventReport with severity-sorted event list
         """
-        prior = prior_ticks or []
-        exposures = client_exposures or {}
+        prior = prior_ticks or []         # Default to empty list if no prior period provided
+        exposures = client_exposures or {}  # Default to zero exposure if not supplied
         events: List[CurrencyEvent] = []
 
+        # Build a lookup map from the prior period: pair → tick dict
+        # This allows O(1) lookups when comparing current vs prior rates
         prior_map: Dict[str, Dict] = {
             t["currency_pair"]: t for t in prior if "currency_pair" in t
         }
 
+        # Iterate over every incoming rate tick and apply all detectors
         for tick in rate_ticks:
             pair = tick.get("currency_pair", "")
             if not pair:
-                continue
+                continue  # Skip malformed ticks with no currency pair
 
-            country = self._country_from_pair(pair)
-            prior_tick = prior_map.get(pair, {})
-            exposure = exposures.get(pair, 0.0)
+            country = self._country_from_pair(pair)      # Derive ISO-2 from pair prefix
+            prior_tick = prior_map.get(pair, {})          # Fetch matching prior tick, or empty
+            exposure = exposures.get(pair, 0.0)           # Client exposure for this pair (ZAR)
 
-            # --- Rate shock ---
+            # --- Detector 1: Rate shock ---
+            # Triggers when the intraday move exceeds 2× the normal daily vol
             event = self._detect_rate_shock(
                 pair, country, tick, prior_tick, exposure
             )
             if event:
                 events.append(event)
 
-            # --- Parallel market collapse ---
+            # --- Detector 2: Parallel market collapse ---
+            # Triggers when official vs parallel rate diverges beyond country threshold
             event = self._detect_parallel_collapse(
                 pair, country, tick, exposure
             )
             if event:
                 events.append(event)
 
-            # --- Corridor illiquidity ---
+            # --- Detector 3: Corridor illiquidity ---
+            # Triggers when bid-ask spread exceeds 5× the normal 20bp benchmark
             event = self._detect_illiquidity(
                 pair, country, tick, exposure
             )
             if event:
                 events.append(event)
 
-            # --- Swap points spike ---
+            # --- Detector 4: Swap points spike ---
+            # Triggers when 3-month swap points shift >50% from prior period
             event = self._detect_swap_spike(
                 pair, country, tick, prior_tick, exposure
             )
             if event:
                 events.append(event)
 
-        # Sort by severity
+        # Sort all detected events so trading desk sees the most critical first.
+        # CRITICAL=0, HIGH=1, MEDIUM=2, LOW=3; unknown severities go to the bottom.
         severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
         events.sort(key=lambda e: severity_order.get(e.severity, 9))
 
+        # Sum up total ZAR exposure across all detected events for the report header
         total_exposure = sum(e.total_client_exposure_zar for e in events)
 
         return CurrencyEventReport(
             events=events,
             total_market_exposure_zar=total_exposure,
         )
+
+    # ------------------------------------------------------------------
+    # Event detectors
+    # ------------------------------------------------------------------
 
     def _detect_rate_shock(
         self,
@@ -177,24 +264,49 @@ class CurrencyEventAlertEngine:
         prior: Dict,
         exposure: float,
     ) -> Optional[CurrencyEvent]:
+        """
+        Detect a rate shock: single-session move exceeding 2× normal daily vol.
+
+        CRITICAL is triggered at 5× normal vol (exceptional move, likely news-driven).
+        HIGH is triggered at 2–5× normal vol (significant but not unprecedented).
+
+        Hedging revenue opportunity is estimated at 50% of the move × exposure,
+        reflecting typical client urgency to hedge after a large dislocation.
+
+        :param pair: Currency pair string e.g. 'NGN/ZAR'
+        :param country: ISO-2 country code
+        :param tick: Current rate tick dict
+        :param prior: Prior period rate tick dict (may be empty)
+        :param exposure: Aggregate client ZAR exposure for this pair
+        :return: CurrencyEvent or None if no shock detected
+        """
+        # Cannot compute a move without prior data; skip silently
         if not prior:
             return None
 
         current = tick.get("mid_rate", 0)
         previous = prior.get("mid_rate", current)
         if not previous:
-            return None
+            return None  # Guard against zero-division
 
+        # Percentage move (absolute, direction resolved separately)
         move = abs(current - previous) / previous
+
+        # Normalise the pair key to look up its baseline vol (strip slashes/spaces)
         pair_key = pair.replace("/", "").replace(" ", "")
-        normal_vol = _NORMAL_DAILY_VOL.get(pair_key, 0.010)
+        normal_vol = _NORMAL_DAILY_VOL.get(pair_key, 0.010)  # Default 1% if unknown pair
 
+        # The shock threshold is 2× the currency's normal daily vol
         if move < 2 * normal_vol:
-            return None
+            return None  # Move is within normal range; not a shock
 
+        # Determine direction for the human-readable headline
         direction = "weakened" if current > previous else "strengthened"
+
+        # Severity: CRITICAL if move is >5× normal vol; otherwise HIGH
         severity = "CRITICAL" if move > 5 * normal_vol else "HIGH"
 
+        # Estimated hedging revenue: 50% of clients are expected to act on a shock
         hedging_opty = exposure * move * 0.50
 
         return CurrencyEvent(
@@ -213,6 +325,7 @@ class CurrencyEventAlertEngine:
                 f"normal daily volatility. Clients with {pair} payables "
                 f"or receivables should review hedging positions."
             ),
+            # Estimate affected clients: one per R5m of exposure (rough heuristic)
             affected_client_count=max(1, int(exposure / 5_000_000)),
             total_client_exposure_zar=exposure,
             hedging_revenue_opportunity_zar=hedging_opty,
@@ -225,19 +338,40 @@ class CurrencyEventAlertEngine:
         tick: Dict,
         exposure: float,
     ) -> Optional[CurrencyEvent]:
+        """
+        Detect a parallel market collapse: official rate and parallel rate
+        diverge beyond the country-specific regulatory threshold.
+
+        Relevant for NG, EG, ZW, ET, AO where dual exchange rate systems
+        create significant cross-border payment and invoice financing risk.
+
+        CRITICAL: premium > 2× threshold (severe divergence, likely policy crisis)
+        HIGH:     premium between threshold and 2× threshold
+
+        :param pair: Currency pair string
+        :param country: ISO-2 country code used to look up threshold
+        :param tick: Current rate tick dict (must include 'parallel_rate')
+        :param exposure: Aggregate client ZAR exposure for this pair
+        :return: CurrencyEvent or None
+        """
+        # Only countries with a defined threshold are monitored for parallel collapse
         threshold = _PARALLEL_THRESHOLD.get(country)
         if not threshold:
-            return None
+            return None  # Country not in the parallel market watch list
 
         official = tick.get("mid_rate", 0)
         parallel = tick.get("parallel_rate")
         if not parallel or not official:
-            return None
+            return None  # Missing data; skip rather than raise a false alert
 
+        # Percentage divergence between parallel and official rate
         premium = abs(parallel - official) / official
+
+        # Only alert if premium exceeds the regulatory tolerance threshold
         if premium < threshold:
             return None
 
+        # Double the threshold indicates a severe policy/governance crisis
         severity = "CRITICAL" if premium > threshold * 2 else "HIGH"
 
         return CurrencyEvent(
@@ -257,8 +391,10 @@ class CurrencyEventAlertEngine:
                 f"threshold for {country}. Cross-border payments and "
                 f"invoice financing for {country} corridors require review."
             ),
+            # One affected client per R10m of exposure (lower density than rate shock)
             affected_client_count=max(1, int(exposure / 10_000_000)),
             total_client_exposure_zar=exposure,
+            # Conservative 0.5% fee opportunity on the at-risk exposure
             hedging_revenue_opportunity_zar=exposure * 0.005,
         )
 
@@ -269,25 +405,46 @@ class CurrencyEventAlertEngine:
         tick: Dict,
         exposure: float,
     ) -> Optional[CurrencyEvent]:
+        """
+        Detect corridor illiquidity: bid-ask spread has widened to 5× or more
+        of the 20bp benchmark spread for liquid African pairs.
+
+        Wide spreads indicate liquidity providers are pulling back, often a
+        leading indicator of a larger move or market closure. Clients with
+        urgent payment requirements face significant slippage.
+
+        Severity is always HIGH (widened spread = execution risk for clients).
+
+        :param pair: Currency pair string
+        :param country: ISO-2 country code
+        :param tick: Rate tick dict (must contain bid_rate, ask_rate, mid_rate)
+        :param exposure: Aggregate client ZAR exposure
+        :return: CurrencyEvent or None
+        """
         bid = tick.get("bid_rate", 0)
         ask = tick.get("ask_rate", 0)
         mid = tick.get("mid_rate", 0)
 
+        # All three prices are required; guard against partial data
         if not mid or not bid or not ask:
             return None
 
+        # Spread as a fraction of mid — standard measure of market liquidity
         spread = (ask - bid) / mid
+
+        # 20bp (0.002) is the benchmark normal spread for liquid African pairs.
+        # At 5× this level (100bp), the market is considered illiquid.
         normal_spread = 0.002   # 20bp is normal for liquid African pairs
 
         if spread < normal_spread * 5:
-            return None
+            return None  # Spread within acceptable range
 
         return CurrencyEvent(
             event_id=f"EVT-ILLIQ-{pair.replace('/', '')}-{datetime.now().strftime('%H%M')}",
             event_type="CORRIDOR_ILLIQUID",
             currency_pair=pair,
             country=country,
-            severity="HIGH",
+            severity="HIGH",  # Illiquidity is always HIGH; never CRITICAL (not a directional move)
             headline=(
                 f"{pair} spread {spread*10000:.0f}bp "
                 f"({spread/normal_spread:.0f}× normal)"
@@ -298,8 +455,11 @@ class CurrencyEventAlertEngine:
                 f"Market is illiquid. Clients with urgent {pair} requirements "
                 f"may face significant slippage."
             ),
+            # Estimate one affected client per R8m of exposure
             affected_client_count=max(1, int(exposure / 8_000_000)),
             total_client_exposure_zar=exposure,
+            # Revenue opportunity: 30% of the widened spread applied to exposure
+            # (clients will pay the spread premium to execute through the bank)
             hedging_revenue_opportunity_zar=exposure * spread * 0.30,
         )
 
@@ -311,13 +471,34 @@ class CurrencyEventAlertEngine:
         prior: Dict,
         exposure: float,
     ) -> Optional[CurrencyEvent]:
+        """
+        Detect a swap points spike: the 3-month forward points have moved more
+        than 50% from the prior period.
+
+        Swap points embed the interest rate differential between two currencies.
+        A sudden spike signals a change in funding conditions, rate expectations,
+        or a breakdown in covered interest parity. Severity is MEDIUM as this is
+        typically a medium-term signal rather than an immediate execution risk.
+
+        :param pair: Currency pair string
+        :param country: ISO-2 country code
+        :param tick: Current rate tick including 'swap_points_3m'
+        :param prior: Prior period tick for comparison
+        :param exposure: Aggregate client ZAR exposure
+        :return: CurrencyEvent or None
+        """
         current_swap = tick.get("swap_points_3m", 0)
+        # Fall back to current if prior swap is not available
         prior_swap = prior.get("swap_points_3m", current_swap)
 
+        # Cannot compute change if prior is zero (avoids division by zero)
         if not prior_swap or prior_swap == 0:
             return None
 
+        # Absolute percentage change in swap points
         change = abs(current_swap - prior_swap) / abs(prior_swap)
+
+        # 50% change threshold: only material moves warrant an alert
         if change < 0.50:   # Less than 50% change
             return None
 
@@ -326,7 +507,7 @@ class CurrencyEventAlertEngine:
             event_type="SWAP_POINTS_SPIKE",
             currency_pair=pair,
             country=country,
-            severity="MEDIUM",
+            severity="MEDIUM",  # Swap spikes are medium severity — monitoring signal, not crisis
             headline=(
                 f"{pair} 3m swap points moved {change*100:.0f}%"
             ),
@@ -336,22 +517,55 @@ class CurrencyEventAlertEngine:
                 f"This signals a change in funding conditions or "
                 f"interest rate expectations for {country}."
             ),
+            # Estimate one affected client per R15m (swap moves affect fewer clients)
             affected_client_count=max(1, int(exposure / 15_000_000)),
             total_client_exposure_zar=exposure,
+            # Conservative 0.2% revenue estimate — swap spikes create repricing discussions
             hedging_revenue_opportunity_zar=exposure * 0.002,
         )
 
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
     def _country_from_pair(self, pair: str) -> str:
-        """Extract 2-letter country code from currency pair like 'NGN/ZAR'."""
+        """
+        Extract the ISO-2 country code from a currency pair string.
+
+        Handles both slash-separated ('NGN/ZAR') and concatenated ('NGAZAR')
+        formats by reading the first three characters as the base currency code.
+
+        :param pair: Currency pair string e.g. 'NGN/ZAR' or 'NGAZAR'
+        :return: Two-letter ISO country code e.g. 'NG'
+        """
         if not pair:
             return "??"
-        # Currency code → country code mapping
+
+        # Mapping of ISO-4217 currency codes to ISO-3166-1 alpha-2 country codes
+        # Used to derive country context from the base currency of a pair
         _CURRENCY_TO_COUNTRY = {
-            "NGN": "NG", "KES": "KE", "GHS": "GH", "TZS": "TZ",
-            "UGX": "UG", "ZMW": "ZM", "ZWL": "ZW", "MZE": "MZ",
-            "BWP": "BW", "NAD": "NA", "ETB": "ET", "XOF": "CI",
-            "CIF": "CI", "XAF": "CM", "AOA": "AO", "MGA": "MG",
-            "RWF": "RW", "MUR": "MU", "EGP": "EG", "MWK": "MW",
+            "NGN": "NG",   # Nigeria
+            "KES": "KE",   # Kenya
+            "GHS": "GH",   # Ghana
+            "TZS": "TZ",   # Tanzania
+            "UGX": "UG",   # Uganda
+            "ZMW": "ZM",   # Zambia
+            "ZWL": "ZW",   # Zimbabwe
+            "MZE": "MZ",   # Mozambique
+            "BWP": "BW",   # Botswana
+            "NAD": "NA",   # Namibia
+            "ETB": "ET",   # Ethiopia
+            "XOF": "CI",   # WACU CFA — Côte d'Ivoire as proxy country
+            "CIF": "CI",   # Alternative CFA code used in some feeds
+            "XAF": "CM",   # Central African CFA — Cameroon as proxy
+            "AOA": "AO",   # Angola
+            "MGA": "MG",   # Madagascar
+            "RWF": "RW",   # Rwanda
+            "MUR": "MU",   # Mauritius
+            "EGP": "EG",   # Egypt
+            "MWK": "MW",   # Malawi
         }
+
+        # Extract base currency: 'NGN' from 'NGN/ZAR', or first 3 chars from 'NGAZAR'
         currency = pair.split("/")[0] if "/" in pair else pair[:3].upper()
         return _CURRENCY_TO_COUNTRY.get(currency, currency[:2])

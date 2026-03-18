@@ -1,33 +1,26 @@
 """
-integration/entity_resolution/entity_graph.py
-
-Graph representation of entity relationships for traversal and impact analysis.
-
-We maintain a lightweight, adjacency-list directed graph of resolved entities
-and their relationships.  This enables:
-
-  - Connected-component clustering (all entities sharing a golden ID group).
-  - Shortest-path analysis for counterparty and guarantor exposure chains.
-  - Key-connector identification (highly connected entities that act as hubs
-    — critical for contagion and AML typology analysis).
-  - Multi-hop traversal to surface hidden related-party relationships for
-    RM briefings and credit decisions.
-
-All operations use only the Python standard library (no networkx).
-
-DISCLAIMER: This project is not a sanctioned initiative of Standard Bank
-Group, MTN, or any affiliated entity. It is a demonstration of concept,
-domain knowledge, and data engineering skill by Thabo Kunene.
+@file entity_graph.py
+@description Entity Relationship Graph for the AfriFlow entity resolution layer.
+             Maintains a lightweight adjacency-list directed graph of resolved
+             entities and their relationships. Supports connected-component
+             clustering, BFS shortest-path analysis, key-connector identification
+             (hub entities with high degree centrality), and multi-hop traversal
+             for hidden related-party discovery. All operations use only the Python
+             standard library — no networkx dependency required.
+@author Thabo Kunene
+@created 2026-03-18
 """
 
-from collections import deque
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
-from enum import Enum
+from collections import deque   # used for BFS queue in traversal methods
+from dataclasses import dataclass, field  # structured node and edge value objects
+from typing import Any, Dict, List, Optional, Set  # full type annotations
+from enum import Enum            # typed relationship categories
 
-from afriflow.exceptions import ConfigurationError
-from afriflow.logging_config import get_logger, log_operation
+# AfriFlow internal imports
+from afriflow.exceptions import ConfigurationError   # raised for invalid graph operations
+from afriflow.logging_config import get_logger, log_operation  # structured logging
 
+# Module-level logger
 logger = get_logger("entity_resolution.entity_graph")
 
 
@@ -37,12 +30,12 @@ logger = get_logger("entity_resolution.entity_graph")
 
 class RelationshipType(Enum):
     """Semantic type of a directed edge in the entity graph."""
-    SAME_AS        = "same_as"          # Golden ID merge / alias
-    SUBSIDIARY_OF  = "subsidiary_of"    # Ownership relationship
-    DIRECTOR_OF    = "director_of"      # Natural person sits on board
-    COUNTERPARTY   = "counterparty"     # Transaction counterparty
-    GUARANTOR_OF   = "guarantor_of"     # Credit guarantee
-    CONNECTED_PARTY = "connected_party" # Regulatory connected-party declaration
+    SAME_AS         = "same_as"          # Golden ID merge or alias — both IDs are the same entity
+    SUBSIDIARY_OF   = "subsidiary_of"    # Ownership relationship — source is owned by target
+    DIRECTOR_OF     = "director_of"      # Natural person sits on board of the target entity
+    COUNTERPARTY    = "counterparty"     # Transaction counterparty relationship
+    GUARANTOR_OF    = "guarantor_of"     # Credit guarantee — source guarantees target's obligations
+    CONNECTED_PARTY = "connected_party"  # Regulatory connected-party declaration (KYC)
 
 
 # ---------------------------------------------------------------------------
@@ -55,21 +48,21 @@ class EntityNode:
     We represent a single entity vertex in the graph.
 
     Attributes:
-        entity_id:  Unique identifier (may be a golden ID).
+        entity_id:   Unique identifier (may be a golden ID).
         entity_type: Broad type — "person", "company", or "group".
-        golden_id:  Golden record ID if the entity has been resolved.
-        domains:    List of domains where this entity appears
-                    (cib, forex, cell, insurance, pbb).
-        country:    ISO 3166-1 alpha-2 country code.
-        metadata:   Arbitrary key-value attributes.
+        golden_id:   Golden record ID if the entity has been resolved.
+        domains:     List of domains where this entity appears
+                     (cib, forex, cell, insurance, pbb).
+        country:     ISO 3166-1 alpha-2 country code.
+        metadata:    Arbitrary key-value attributes.
     """
 
-    entity_id: str
-    entity_type: str
-    country: str
-    domains: List[str] = field(default_factory=list)
-    golden_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    entity_id: str                                       # unique vertex identifier
+    entity_type: str                                     # "person", "company", or "group"
+    country: str                                         # ISO 3166-1 alpha-2 country code
+    domains: List[str] = field(default_factory=list)     # domains where this entity appears
+    golden_id: Optional[str] = None                      # resolved golden record ID (if any)
+    metadata: Dict[str, Any] = field(default_factory=dict)  # arbitrary additional attributes
 
 
 @dataclass
@@ -85,11 +78,11 @@ class EntityEdge:
         metadata:           Arbitrary key-value attributes.
     """
 
-    source_id: str
-    target_id: str
-    relationship_type: RelationshipType
-    weight: float = 1.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    source_id: str                                       # origin entity ID
+    target_id: str                                       # destination entity ID
+    relationship_type: RelationshipType                  # semantic type of the relationship
+    weight: float = 1.0                                  # edge weight — lower means closer
+    metadata: Dict[str, Any] = field(default_factory=dict)  # arbitrary edge attributes
 
 
 # ---------------------------------------------------------------------------
@@ -116,10 +109,10 @@ class EntityGraph:
     """
 
     def __init__(self) -> None:
-        """Initialise an empty entity graph."""
-        self._nodes: Dict[str, EntityNode] = {}
-        self._adj: Dict[str, List[EntityEdge]] = {}    # outgoing
-        self._radj: Dict[str, List[EntityEdge]] = {}   # incoming
+        """Initialise an empty entity graph with no nodes or edges."""
+        self._nodes: Dict[str, EntityNode] = {}           # vertex store
+        self._adj: Dict[str, List[EntityEdge]] = {}        # outgoing edges per node
+        self._radj: Dict[str, List[EntityEdge]] = {}       # incoming edges per node (reverse)
         logger.info("EntityGraph initialised")
 
     # ------------------------------------------------------------------
@@ -141,20 +134,16 @@ class EntityGraph:
         If a node with the same entity_id already exists it is updated
         in-place (domains are merged, metadata is merged).
 
-        Args:
-            entity_id:   Unique identifier.
-            entity_type: "person", "company", or "group".
-            country:     ISO 3166-1 alpha-2 country code.
-            domains:     Domain list (cib / forex / cell / insurance / pbb).
-            golden_id:   Optional resolved golden record ID.
-            metadata:    Optional key-value attributes.
-
-        Returns:
-            The new or updated EntityNode.
-
-        Raises:
-            ConfigurationError: If entity_type is not one of the valid values.
+        :param entity_id:   Unique identifier.
+        :param entity_type: "person", "company", or "group".
+        :param country:     ISO 3166-1 alpha-2 country code.
+        :param domains:     Domain list (cib / forex / cell / insurance / pbb).
+        :param golden_id:   Optional resolved golden record ID.
+        :param metadata:    Optional key-value attributes.
+        :return: The new or updated EntityNode.
+        :raises ConfigurationError: If entity_type is not one of the valid values.
         """
+        # Enforce the three recognised entity types to prevent typos in data pipelines
         valid_types = {"person", "company", "group"}
         if entity_type not in valid_types:
             raise ConfigurationError(
@@ -163,26 +152,30 @@ class EntityGraph:
             )
 
         if entity_id in self._nodes:
+            # Update existing node: merge domains (deduplicated) and metadata
             node = self._nodes[entity_id]
             if domains:
+                # dict.fromkeys preserves insertion order while deduplicating
                 merged = list(dict.fromkeys(node.domains + domains))
                 node.domains = merged
             if golden_id:
-                node.golden_id = golden_id
+                node.golden_id = golden_id  # overwrite with the latest resolved ID
             if metadata:
-                node.metadata.update(metadata)
+                node.metadata.update(metadata)  # shallow merge
             logger.debug(f"Updated existing node: {entity_id}")
             return node
 
+        # Create and register a new node
         node = EntityNode(
             entity_id=entity_id,
             entity_type=entity_type,
-            country=country.upper(),
+            country=country.upper(),  # normalise to uppercase ISO code
             domains=domains or [],
             golden_id=golden_id,
             metadata=metadata or {},
         )
         self._nodes[entity_id] = node
+        # Pre-initialise adjacency lists to avoid KeyError on first edge add
         self._adj.setdefault(entity_id, [])
         self._radj.setdefault(entity_id, [])
         logger.debug(f"Added node: {entity_id} ({entity_type}, {country})")
@@ -199,19 +192,15 @@ class EntityGraph:
         """
         We add a directed relationship edge between two nodes.
 
-        Args:
-            source_id:          Origin entity.
-            target_id:          Destination entity.
-            relationship_type:  RelationshipType enum value.
-            weight:             Edge weight (default 1.0).
-            metadata:           Optional key-value attributes.
-
-        Returns:
-            The created EntityEdge.
-
-        Raises:
-            ConfigurationError: If either node is not registered or weight ≤ 0.
+        :param source_id:          Origin entity.
+        :param target_id:          Destination entity.
+        :param relationship_type:  RelationshipType enum value.
+        :param weight:             Edge weight (default 1.0; must be > 0).
+        :param metadata:           Optional key-value attributes.
+        :return: The created EntityEdge.
+        :raises ConfigurationError: If either node is not registered or weight <= 0.
         """
+        # Both nodes must exist before an edge can be created
         if source_id not in self._nodes:
             raise ConfigurationError(
                 f"Source node '{source_id}' not in graph. Add it first.",
@@ -222,6 +211,7 @@ class EntityGraph:
                 f"Target node '{target_id}' not in graph. Add it first.",
                 details={"target_id": target_id},
             )
+        # Zero or negative weights are invalid for this graph model
         if weight <= 0:
             raise ConfigurationError(
                 f"Edge weight must be > 0, got {weight}",
@@ -235,6 +225,7 @@ class EntityGraph:
             weight=weight,
             metadata=metadata or {},
         )
+        # Record edge in both forward (adj) and reverse (radj) indexes
         self._adj[source_id].append(edge)
         self._radj[target_id].append(edge)
         logger.debug(
@@ -256,17 +247,12 @@ class EntityGraph:
         We find all entity nodes reachable from entity_id within max_depth
         hops, traversing both outgoing and incoming edges (undirected view).
 
-        Args:
-            entity_id:          Starting node.
-            max_depth:          Maximum number of hops.
-            relationship_types: If provided, only traverse edges of these types.
-
-        Returns:
-            List of EntityNode objects (not including entity_id itself),
-            ordered by discovery depth then entity_id.
-
-        Raises:
-            ConfigurationError: If entity_id is not in the graph.
+        :param entity_id:          Starting node.
+        :param max_depth:          Maximum number of hops (default 3).
+        :param relationship_types: If provided, only traverse edges of these types.
+        :return: List of EntityNode objects ordered by discovery depth then entity_id.
+                 Does not include the starting node.
+        :raises ConfigurationError: If entity_id is not in the graph.
         """
         if entity_id not in self._nodes:
             raise ConfigurationError(
@@ -279,30 +265,31 @@ class EntityGraph:
             entity_id=entity_id, max_depth=max_depth,
         )
 
+        # Convert optional list to a set for O(1) membership tests
         rt_filter: Optional[Set[RelationshipType]] = (
             set(relationship_types) if relationship_types else None
         )
 
-        visited: Set[str] = {entity_id}
-        queue: deque = deque([(entity_id, 0)])
+        visited: Set[str] = {entity_id}  # track visited nodes to avoid cycles
+        queue: deque = deque([(entity_id, 0)])  # (node_id, depth)
         result_ids: List[str] = []
 
         while queue:
             current_id, depth = queue.popleft()
             if depth >= max_depth:
-                continue
+                continue  # do not traverse beyond the depth limit
 
-            # Outgoing edges
+            # Traverse outgoing edges (forward direction)
             for edge in self._adj.get(current_id, []):
                 if rt_filter and edge.relationship_type not in rt_filter:
-                    continue
+                    continue  # skip edge types not in the filter
                 neighbour = edge.target_id
                 if neighbour not in visited:
                     visited.add(neighbour)
                     result_ids.append(neighbour)
                     queue.append((neighbour, depth + 1))
 
-            # Incoming edges (traverse in both directions)
+            # Traverse incoming edges (reverse direction — undirected BFS)
             for edge in self._radj.get(current_id, []):
                 if rt_filter and edge.relationship_type not in rt_filter:
                     continue
@@ -328,17 +315,13 @@ class EntityGraph:
         We find the shortest path between two entities using BFS on the
         undirected view of the graph.
 
-        Args:
-            source_id: Starting entity.
-            target_id: Destination entity.
-
-        Returns:
-            Ordered list of entity IDs from source to target, or None if
-            no path exists.
-
-        Raises:
-            ConfigurationError: If either node is not in the graph.
+        :param source_id: Starting entity.
+        :param target_id: Destination entity.
+        :return: Ordered list of entity IDs from source to target,
+                 or None if no path exists.
+        :raises ConfigurationError: If either node is not in the graph.
         """
+        # Validate both endpoints before starting BFS
         for nid in (source_id, target_id):
             if nid not in self._nodes:
                 raise ConfigurationError(
@@ -346,16 +329,18 @@ class EntityGraph:
                     details={"node_id": nid},
                 )
 
+        # Trivial case: source and target are the same node
         if source_id == target_id:
             return [source_id]
 
-        # BFS with predecessor tracking
+        # BFS with predecessor path tracking
         visited: Set[str] = {source_id}
-        queue: deque = deque([(source_id, [source_id])])
+        queue: deque = deque([(source_id, [source_id])])  # (node_id, path_so_far)
 
         while queue:
             current_id, path = queue.popleft()
 
+            # Collect all neighbours in both directions (undirected BFS)
             neighbours: List[str] = []
             for edge in self._adj.get(current_id, []):
                 neighbours.append(edge.target_id)
@@ -364,27 +349,22 @@ class EntityGraph:
 
             for neighbour in neighbours:
                 if neighbour == target_id:
-                    return path + [target_id]
+                    return path + [target_id]  # shortest path found
                 if neighbour not in visited:
                     visited.add(neighbour)
                     queue.append((neighbour, path + [neighbour]))
 
-        return None
+        return None  # no path exists between source and target
 
     def get_cluster(self, entity_id: str) -> List[str]:
         """
         We return the connected component containing entity_id — all
         entity IDs reachable from it in the undirected graph.
 
-        Args:
-            entity_id: Any node in the graph.
-
-        Returns:
-            Sorted list of all entity IDs in the same connected component,
-            including entity_id.
-
-        Raises:
-            ConfigurationError: If entity_id is not in the graph.
+        :param entity_id: Any node in the graph.
+        :return: Sorted list of all entity IDs in the same connected component,
+                 including entity_id itself.
+        :raises ConfigurationError: If entity_id is not in the graph.
         """
         if entity_id not in self._nodes:
             raise ConfigurationError(
@@ -392,13 +372,14 @@ class EntityGraph:
                 details={"entity_id": entity_id},
             )
 
-        # BFS with unlimited depth
+        # Unlimited BFS to collect the full connected component
         visited: Set[str] = set()
         queue: deque = deque([entity_id])
         visited.add(entity_id)
 
         while queue:
             current_id = queue.popleft()
+            # Collect all undirected neighbours
             neighbours: List[str] = []
             for edge in self._adj.get(current_id, []):
                 neighbours.append(edge.target_id)
@@ -409,7 +390,7 @@ class EntityGraph:
                     visited.add(n)
                     queue.append(n)
 
-        return sorted(visited)
+        return sorted(visited)  # sorted for deterministic output
 
     # ------------------------------------------------------------------
     # Analytics
@@ -423,23 +404,20 @@ class EntityGraph:
         We identify hub entities with high degree centrality — nodes with
         many connections that serve as critical connectors in the graph.
 
-        These are important for:
+        These hubs are important for:
           - AML typology detection (structuring hubs).
           - Cross-sell opportunity mapping (widely-connected clients).
           - Contagion analysis (default propagation risk).
 
-        Args:
-            min_connections: Minimum total degree (in + out) to be included.
-
-        Returns:
-            List of dicts sorted descending by total_degree, each with:
-                entity_id, entity_type, country, in_degree, out_degree,
-                total_degree, domains.
+        :param min_connections: Minimum total degree (in + out) to be included.
+        :return: List of dicts sorted descending by total_degree. Each dict
+                 contains: entity_id, entity_type, country, in_degree,
+                 out_degree, total_degree, domains, golden_id.
         """
         result = []
         for entity_id, node in self._nodes.items():
-            out_degree = len(self._adj.get(entity_id, []))
-            in_degree = len(self._radj.get(entity_id, []))
+            out_degree = len(self._adj.get(entity_id, []))   # outgoing edge count
+            in_degree = len(self._radj.get(entity_id, []))   # incoming edge count
             total = in_degree + out_degree
             if total >= min_connections:
                 result.append({
@@ -453,6 +431,7 @@ class EntityGraph:
                     "golden_id": node.golden_id,
                 })
 
+        # Sort by total degree descending so the most connected entities appear first
         result.sort(key=lambda x: x["total_degree"], reverse=True)
         return result
 
@@ -460,11 +439,12 @@ class EntityGraph:
         """
         We return graph-wide structural statistics.
 
-        Returns:
-            Dictionary with node/edge counts, relationship type distribution,
-            domain coverage, and country coverage.
+        :return: Dictionary with node/edge counts, relationship type distribution,
+                 domain coverage, country coverage, and isolated node count.
         """
         total_edges = sum(len(edges) for edges in self._adj.values())
+
+        # Count edges by relationship type
         by_relationship: Dict[str, int] = {}
         for edges in self._adj.values():
             for edge in edges:
@@ -472,15 +452,18 @@ class EntityGraph:
                 by_relationship[rt] = by_relationship.get(rt, 0) + 1
 
         countries: Set[str] = {n.country for n in self._nodes.values()}
+
+        # Count nodes by entity type (person / company / group)
         entity_types: Dict[str, int] = {}
         for n in self._nodes.values():
             entity_types[n.entity_type] = entity_types.get(n.entity_type, 0) + 1
 
+        # Collect all distinct domain names across all nodes
         all_domains: Set[str] = set()
         for n in self._nodes.values():
             all_domains.update(n.domains)
 
-        # Count isolated nodes (degree 0)
+        # Isolated nodes have no edges in either direction — potential data quality issues
         isolated = sum(
             1 for eid in self._nodes
             if not self._adj.get(eid) and not self._radj.get(eid)
@@ -504,7 +487,7 @@ class EntityGraph:
 if __name__ == "__main__":
     graph = EntityGraph()
 
-    # Build a small pan-African entity graph
+    # Build a small pan-African entity graph for demonstration
     entities = [
         ("GLD-001", "company", "ZA", ["cib", "forex"],   "MTN Group Limited"),
         ("GLD-002", "company", "NG", ["cib", "cell"],    "MTN Nigeria"),
@@ -517,7 +500,7 @@ if __name__ == "__main__":
     for eid, etype, country, domains, _name in entities:
         graph.add_node(eid, etype, country, domains, metadata={"name": _name})
 
-    # Add relationships
+    # Add relationship edges
     edges = [
         ("GLD-002", "GLD-001", RelationshipType.SUBSIDIARY_OF),
         ("GLD-003", "GLD-001", RelationshipType.SUBSIDIARY_OF),

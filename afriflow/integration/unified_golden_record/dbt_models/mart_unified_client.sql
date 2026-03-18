@@ -1,6 +1,17 @@
+-- =============================================================================
+-- @file mart_unified_client.sql
+-- @description Materialises the Unified Client 360 golden record — the
+--     single authoritative table combining every client's relationship across
+--     all five AfriFlow domains: CIB, Forex, Insurance, Cell Network, and PBB.
+--     Powers RM dashboards, cross-sell opportunity identification, risk
+--     heatmaps, and revenue attribution. Freshness SLA: sub-5-minute.
+-- @author Thabo Kunene
+-- @created 2026-03-18
+-- =============================================================================
+
 {{
     config(
-        materialized='table',
+        materialized='table',         -- Full refresh on each dbt run
         tags=['integration', 'unified', 'client_360']
     )
 }}
@@ -22,11 +33,15 @@
     Accuracy target: 99.97%
 */
 
+-- ── CTE: entity_resolution ────────────────────────────────────────────────────
+-- Base entity registry: only include active golden records (soft-deletes excluded)
 WITH entity_resolution AS (
     SELECT * FROM {{ ref('stg_entity_resolution') }}
-    WHERE is_active = TRUE
+    WHERE is_active = TRUE  -- Exclude deactivated / merged-away records
 ),
 
+-- ── CTE: cib_metrics ──────────────────────────────────────────────────────────
+-- Aggregate CIB payment flows per golden record: corridors, value, fee income
 -- CIB domain aggregation
 cib_metrics AS (
     SELECT
@@ -41,6 +56,8 @@ cib_metrics AS (
     GROUP BY golden_id
 ),
 
+-- ── CTE: forex_metrics ────────────────────────────────────────────────────────
+-- Aggregate FX trade positions per golden record: currencies, hedged vs unhedged
 -- Forex domain aggregation
 forex_metrics AS (
     SELECT
@@ -57,6 +74,8 @@ forex_metrics AS (
     GROUP BY golden_id
 ),
 
+-- ── CTE: insurance_metrics ────────────────────────────────────────────────────
+-- Aggregate insurance policies per golden record: premiums, coverage gaps, claims
 -- Insurance domain aggregation
 insurance_metrics AS (
     SELECT
@@ -74,6 +93,8 @@ insurance_metrics AS (
     GROUP BY golden_id
 ),
 
+-- ── CTE: cell_metrics ─────────────────────────────────────────────────────────
+-- Aggregate MTN cell/MoMo data per golden record: SIM counts, workforce estimates
 -- Cell network aggregation
 cell_metrics AS (
     SELECT
@@ -91,6 +112,8 @@ cell_metrics AS (
     GROUP BY golden_id
 ),
 
+-- ── CTE: pbb_metrics ──────────────────────────────────────────────────────────
+-- Aggregate PBB payroll banking data per golden record: headcount, payroll, digital
 -- PBB aggregation
 pbb_metrics AS (
     SELECT
@@ -106,6 +129,10 @@ pbb_metrics AS (
     GROUP BY golden_id
 ),
 
+-- ── CTE: combined ─────────────────────────────────────────────────────────────
+-- LEFT JOIN all five domain metric CTEs onto the entity resolution base.
+-- LEFT JOIN ensures clients with no data in a domain still appear (NULL metrics
+-- are handled by COALESCE with 0 in the final SELECT).
 -- Combine all domain metrics
 combined AS (
     SELECT
@@ -117,20 +144,20 @@ combined AS (
         er.client_tier,
         er.relationship_manager,
         er.client_segment,
-        er.match_confidence,
-        er.match_method,
-        er.domains_matched,
-        er.human_verified,
+        er.match_confidence,    -- Entity resolution confidence score (0–1)
+        er.match_method,        -- How the entity was resolved (e.g. tax_number, fuzzy)
+        er.domains_matched,     -- Number of domains matched during entity resolution
+        er.human_verified,      -- Whether an analyst has reviewed the match
         er.verification_date,
 
-        -- Domain presence flags
+        -- Domain presence flags: TRUE when the domain contributed at least one record
         COALESCE(cib.golden_id IS NOT NULL, FALSE) AS has_cib,
         COALESCE(forex.golden_id IS NOT NULL, FALSE) AS has_forex,
         COALESCE(insurance.golden_id IS NOT NULL, FALSE) AS has_insurance,
         COALESCE(cell.golden_id IS NOT NULL, FALSE) AS has_cell,
         COALESCE(pbb.golden_id IS NOT NULL, FALSE) AS has_pbb,
 
-        -- Count of active domains
+        -- Count of active domains (0–5): drives cross-sell score and risk assessment
         (
             CASE WHEN cib.golden_id IS NOT NULL THEN 1 ELSE 0 END +
             CASE WHEN forex.golden_id IS NOT NULL THEN 1 ELSE 0 END +
@@ -203,12 +230,17 @@ combined AS (
     LEFT JOIN pbb_metrics pbb ON er.golden_id = pbb.golden_id
 ),
 
+-- ── CTE: with_derived ─────────────────────────────────────────────────────────
+-- Derive composite scores, cross-sell priority, risk signals, and activity dates
+-- from the combined domain metrics. All business logic lives here, not in the
+-- final SELECT, to keep the output column list clean and readable.
 -- Calculate derived fields
 with_derived AS (
     SELECT
         *,
 
-        -- Total relationship value
+        -- Total relationship value: sum of CIB flows + forex volume + insurance premium
+        -- plus estimated fee income streams from CIB and Forex
         (
             COALESCE(cib_annual_value, 0) +
             COALESCE(forex_annual_volume, 0) +
@@ -217,19 +249,21 @@ with_derived AS (
             COALESCE(forex_estimated_revenue, 0)
         ) AS total_relationship_value_zar,
 
-        -- Cross-sell score (based on product gaps)
+        -- Cross-sell score: inversely proportional to active domains
+        -- A client with 1 domain has 95% of products still to cross-sell into
         CASE
-            WHEN domains_active = 1 THEN 95
+            WHEN domains_active = 1 THEN 95  -- Single-domain: maximum opportunity
             WHEN domains_active = 2 THEN 75
             WHEN domains_active = 3 THEN 50
-            WHEN domains_active = 4 THEN 25
-            ELSE 0
+            WHEN domains_active = 4 THEN 25  -- Near-full: residual opportunity only
+            ELSE 0                           -- All 5 domains active
         END AS cross_sell_score,
 
-        -- Missing product count
+        -- Missing product count: how many of the 5 domains are not yet present
         (5 - domains_active) AS missing_product_count,
 
-        -- Last activity across all domains
+        -- Most recent activity date across ALL domains: used for days-since calculation
+        -- Sentinel value 1900-01-01 ensures NULL dates do not win the GREATEST()
         GREATEST(
             COALESCE(cib_last_activity, DATE '1900-01-01'),
             COALESCE(forex_last_activity, DATE '1900-01-01'),
@@ -238,11 +272,12 @@ with_derived AS (
             COALESCE(pbb_last_activity, DATE '1900-01-01')
         ) AS last_activity_any_domain,
 
-        -- Cell-PBB capture ratio
+        -- Cell-PBB capture ratio: what fraction of MTN SIM-estimated employees
+        -- actually have PBB payroll accounts (workforce banking penetration)
         CASE
             WHEN COALESCE(pbb_total_employees, 0) > 0
             THEN ROUND(COALESCE(cell_estimated_employees, 0)::NUMERIC / pbb_total_employees::NUMERIC, 2)
-            ELSE NULL
+            ELSE NULL  -- Cannot compute ratio when PBB employee count is zero
         END AS cell_pbb_capture_ratio
 
     FROM combined
@@ -338,7 +373,8 @@ SELECT
     -- Derived fields
     total_relationship_value_zar,
 
-    -- Cross-sell priority
+    -- Cross-sell priority: high-value clients with few domains are the primary targets
+    -- for RM-led product expansion conversations
     CASE
         WHEN domains_active <= 2 AND total_relationship_value_zar > 1000000 THEN 'high'
         WHEN domains_active <= 3 AND total_relationship_value_zar > 500000 THEN 'medium'
@@ -347,51 +383,55 @@ SELECT
     cross_sell_score,
     missing_product_count,
 
-    -- Primary risk signal
+    -- Primary risk signal: the single highest-priority risk flag for the RM briefing
+    -- Priority order: FX exposure > insurance gap > attrition signal > dormant accounts
     CASE
         WHEN COALESCE(forex_unhedged_value, 0) > 1000000 THEN 'fx_exposure'
         WHEN COALESCE(insurance_coverage_gaps, 0) > 0 THEN 'insurance_gap'
-        WHEN COALESCE(cell_sim_growth_pct, 0) < -10 THEN 'client_attrition'
-        WHEN COALESCE(pbb_dormant_pct, 0) > 30 THEN 'dormant_accounts'
+        WHEN COALESCE(cell_sim_growth_pct, 0) < -10 THEN 'client_attrition'  -- SIM base shrinking
+        WHEN COALESCE(pbb_dormant_pct, 0) > 30 THEN 'dormant_accounts'        -- >30% of PBB dormant
         ELSE 'none'
     END AS primary_risk_signal,
 
-    -- Risk score
+    -- Composite risk score (0–100): additive across four independent risk dimensions
     (
-        CASE WHEN COALESCE(forex_unhedged_value, 0) > 1000000 THEN 25 ELSE 0 END +
-        CASE WHEN COALESCE(insurance_coverage_gaps, 0) > 0 THEN 20 ELSE 0 END +
-        CASE WHEN COALESCE(cell_sim_growth_pct, 0) < -10 THEN 25 ELSE 0 END +
-        CASE WHEN COALESCE(pbb_dormant_pct, 0) > 30 THEN 15 ELSE 0 END +
-        CASE WHEN domains_active = 1 THEN 15 ELSE 0 END
+        CASE WHEN COALESCE(forex_unhedged_value, 0) > 1000000 THEN 25 ELSE 0 END +  -- FX risk
+        CASE WHEN COALESCE(insurance_coverage_gaps, 0) > 0 THEN 20 ELSE 0 END +     -- Insurance gap
+        CASE WHEN COALESCE(cell_sim_growth_pct, 0) < -10 THEN 25 ELSE 0 END +       -- Attrition signal
+        CASE WHEN COALESCE(pbb_dormant_pct, 0) > 30 THEN 15 ELSE 0 END +            -- Dormancy risk
+        CASE WHEN domains_active = 1 THEN 15 ELSE 0 END                             -- Concentration risk
     ) AS risk_score,
 
-    -- Workforce capture
+    -- Workforce capture: what fraction of the MTN-estimated workforce is banked with PBB
     cell_pbb_capture_ratio,
+    -- Uncaptured employees: headcount gap between cell estimates and PBB accounts
     CASE
         WHEN COALESCE(cell_estimated_employees, 0) > COALESCE(pbb_total_employees, 0)
         THEN COALESCE(cell_estimated_employees, 0) - COALESCE(pbb_total_employees, 0)
-        ELSE 0
+        ELSE 0  -- No gap if PBB already covers all MTN-estimated employees
     END AS uncaptured_employees,
 
-    -- Data shadow health
+    -- Data shadow health score (0–100): 100 when all 5 domains present, -20 per missing domain
     (100 - (missing_product_count * 20)) AS shadow_health_score,
     missing_product_count AS shadow_open_gaps,
+    -- Estimated revenue opportunity from missing domains: R50k per domain gap (conservative proxy)
     (missing_product_count * 50000) AS shadow_total_opportunity,
 
-    -- Days since activity
+    -- Days since most recent activity on any domain: used for attrition early-warning
+    -- Returns NULL when the sentinel date 1900-01-01 survived (client never active)
     CASE
         WHEN last_activity_any_domain > DATE '1900-01-01'
         THEN DATE_PART('day', CURRENT_DATE - last_activity_any_domain)::INTEGER
         ELSE NULL
     END AS days_since_any_activity,
 
-    -- Metadata
+    -- POPIA classification: all records are restricted; flag those containing SA/NG/KE PII
     'POPIA_RESTRICTED' AS data_classification,
-    home_country IN ('ZA', 'NG', 'KE') AS contains_za_pii,
+    home_country IN ('ZA', 'NG', 'KE') AS contains_za_pii,  -- High-regulation jurisdictions
     CURRENT_TIMESTAMP AS record_created_at,
     CURRENT_TIMESTAMP AS record_updated_at,
     '{{ invocation_id }}' AS dbt_run_id,
     CURRENT_DATE AS snapshot_date
 
 FROM with_derived
-WHERE domains_active >= 1
+WHERE domains_active >= 1  -- Exclude orphan entity resolution records with no domain data

@@ -1,3 +1,34 @@
+# =============================================================================
+# @file spark-operator.yml
+# @description Deploys the Kubeflow Spark Operator and all supporting
+#              Kubernetes resources required to run Apache Spark batch
+#              processing jobs on Kubernetes for AfriFlow. Resources defined:
+#                - Namespace                   afriflow             (idempotent re-declaration)
+#                - ServiceAccount              spark-operator       (operator identity)
+#                - ServiceAccount              spark-application    (job pod identity)
+#                - Role                        spark-operator-role  (namespace RBAC)
+#                - ClusterRole                 spark-operator-cluster-role (node/storage read)
+#                - RoleBinding                 spark-operator-role-binding
+#                - ClusterRoleBinding          spark-operator-cluster-role-binding
+#                - Deployment                  spark-operator
+#                - Service                     spark-operator-webhook
+#                - Certificate                 spark-webhook-cert   (cert-manager)
+#                - Issuer                      spark-selfsigned-issuer
+#                - MutatingWebhookConfiguration
+#                - ValidatingWebhookConfiguration
+#                - SparkApplication            spark-py-template    (CRD example)
+#                - ConfigMap                   spark-default-config
+#                - Secret                      spark-aws-credentials (template)
+#                - PersistentVolumeClaim        spark-logs-pvc
+#                - PodDisruptionBudget          spark-operator-pdb
+#                - ServiceMonitor               spark-operator-monitor
+#              The Spark Operator pattern replaces spark-submit scripts with
+#              declarative SparkApplication CRDs, giving GitOps tools full
+#              visibility and control over batch job lifecycle.
+# @author Thabo Kunene
+# @created 2026-03-17
+# =============================================================================
+
 # AfriFlow Spark Operator
 #
 # We deploy the Spark on Kubernetes operator for batch
@@ -9,16 +40,25 @@
 # It is a demonstration of concept, domain knowledge,
 # and data engineering skill by Thabo Kunene.
 
+# ---- Resource 1: Namespace (idempotent re-declaration) --------------------
+# Re-declaring the namespace here makes this file self-contained and safe
+# to apply in isolation (e.g. in a CI environment that only applies this
+# file). Kubernetes treats a duplicate Namespace apply as a no-op.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: afriflow
   labels:
     name: afriflow
+    # Kubernetes recommended label for tooling interoperability (Helm,
+    # kubectl-tree, cluster-scoped dashboards).
     app.kubernetes.io/name: afriflow
 
 ---
 # Service Account for Spark Operator
+# A dedicated ServiceAccount for the operator process itself (the controller
+# loop). Separating it from spark-application (below) applies least-privilege:
+# the operator needs broad API access, but individual job pods do not.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -31,6 +71,9 @@ metadata:
 
 ---
 # Service Account for Spark Applications
+# Driver and executor pods use this ServiceAccount, which carries narrower
+# permissions than spark-operator. Keeping them separate prevents a
+# compromised job pod from escalating to operator-level cluster access.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -43,6 +86,9 @@ metadata:
 
 ---
 # RBAC Role for Spark Operator
+# Namespace-scoped Role grants the operator everything it needs to reconcile
+# SparkApplication CRDs and manage the pods/services they create, while
+# keeping all permissions bounded to the afriflow namespace.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -53,26 +99,47 @@ metadata:
     app.kubernetes.io/name: spark-operator
 rules:
   - apiGroups: [""]
+    # pods: create/delete driver and executor pods for each SparkApplication.
+    # services: create per-driver Service so executors can connect back.
+    # configmaps: store Spark configuration passed to driver/executor pods.
+    # secrets: read AWS/S3 credentials mounted into job pods.
+    # persistentvolumeclaims: provision log PVCs for individual job outputs.
     resources: ["pods", "services", "configmaps", "secrets", "persistentvolumeclaims"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
+    # Read-only node access for scheduling hints: the operator can inspect
+    # node labels and taints to inform driver/executor placement.
     resources: ["nodes"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
+    # Deployments/StatefulSets: used by the operator for its own rolling
+    # update reconciliation and for managing History Server deployments.
     resources: ["deployments", "statefulsets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["batch"]
+    # Jobs: some SparkApplication types use Kubernetes batch Jobs for
+    # the driver pod lifecycle management.
     resources: ["jobs"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["sparkoperator.k8s.io"]
+    # Full CRUD on SparkApplication and ScheduledSparkApplication CRDs,
+    # plus their /status subresources so the operator can report job state
+    # back to the Kubernetes API without triggering a full reconcile.
     resources: ["sparkapplications", "sparkapplications/status", "scheduledsparkapplications", "scheduledsparkapplications/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["admissionregistration.k8s.io"]
+    # The operator registers mutating and validating webhooks at startup
+    # to inject default configuration into SparkApplication pods. It needs
+    # to create/update these webhook registrations as part of its bootstrap.
     resources: ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
 ---
 # RBAC ClusterRole for Spark Operator (node access)
+# A ClusterRole is required for node and StorageClass reads because those
+# resources are cluster-scoped (not namespace-scoped). We deliberately keep
+# this ClusterRole minimal — only the read-only verbs needed for scheduling
+# decisions.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -82,14 +149,21 @@ metadata:
     app.kubernetes.io/name: spark-operator
 rules:
   - apiGroups: [""]
+    # Node read access so the operator can filter executor placement based
+    # on node labels (e.g. afriflow/node-type: batch) and resource capacity.
     resources: ["nodes"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["storage.k8s.io"]
+    # StorageClass read access so the operator can validate that the
+    # storageClassName referenced in SparkApplication volumes actually exists
+    # before attempting to provision a PVC.
     resources: ["storageclasses"]
     verbs: ["get", "list", "watch"]
 
 ---
 # RBAC RoleBinding for Spark Operator
+# Binds the namespace-scoped Role to the spark-operator ServiceAccount,
+# granting it namespace-level permissions within afriflow.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -109,6 +183,9 @@ roleRef:
 
 ---
 # RBAC ClusterRoleBinding for Spark Operator
+# Binds the ClusterRole (node + StorageClass read) to the spark-operator
+# ServiceAccount so the cluster-scoped reads work alongside the
+# namespace-scoped Role above.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -127,6 +204,10 @@ roleRef:
 
 ---
 # Spark Operator Deployment
+# The operator runs a single replica that watches the afriflow namespace for
+# SparkApplication CRDs and reconciles them into driver/executor pods. A
+# single replica is standard for Kubernetes operators; leader election
+# (configured via CLI args below) handles failover if the pod is evicted.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -137,10 +218,15 @@ metadata:
     app.kubernetes.io/name: spark-operator
     app.kubernetes.io/component: operator
   annotations:
+    # Prometheus scrape annotations at the Deployment level are advisory;
+    # the pod-level annotations (in the template below) are what Prometheus
+    # actually reads at scrape time.
     prometheus.io/scrape: "true"
     prometheus.io/port: "10254"
     prometheus.io/path: "/metrics"
 spec:
+  # One operator replica is the standard pattern; leader election (below)
+  # handles the edge case of two replicas racing on startup.
   replicas: 1
   selector:
     matchLabels:
@@ -154,64 +240,115 @@ spec:
         app.kubernetes.io/name: spark-operator
         app.kubernetes.io/component: operator
       annotations:
+        # Pod-level annotations ensure Prometheus discovers the metrics
+        # endpoint at /metrics on port 10254.
         prometheus.io/scrape: "true"
         prometheus.io/port: "10254"
         prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: spark-operator
       securityContext:
+        # UID 185 is the non-root user in the kubeflow/spark-operator image.
+        # Running as non-root satisfies security policies and prevents
+        # the operator from modifying host filesystem paths.
         fsGroup: 185
         runAsUser: 185
         runAsGroup: 185
       containers:
         - name: spark-operator
+          # v1beta2-1.5.0-3.3.0: operator version 1.5.0 built against Spark
+          # 3.3.0. Pinning the full tag prevents unintended upgrades and
+          # keeps the operator/Spark API versions in sync.
           image: docker.io/kubeflow/spark-operator:v1beta2-1.5.0-3.3.0
           imagePullPolicy: IfNotPresent
           args:
+            # Verbosity level 2: INFO-level logging including reconcile
+            # events, sufficient for production debugging without flooding
+            # log storage with DEBUG output.
             - -v=2
+            # Write logs to stderr so they are captured by the container
+            # runtime and forwarded to the cluster's log aggregator.
             - -logtostderr
+            # Disable batch scheduler integration (e.g. Volcano, Yunikorn)
+            # since AfriFlow uses Kubernetes default scheduler.
             - -enable-batch-scheduler=false
+            # Enable the admission webhook so the operator can inject Spark
+            # configuration into driver/executor pods automatically.
             - -enable-webhook=true
+            # Expose a Prometheus-compatible /metrics endpoint.
             - -enable-metrics=true
             - -metrics-port=10254
             - -metrics-endpoint=/metrics
+            # Restrict the operator to only reconcile SparkApplications in
+            # the afriflow namespace, preventing it from interfering with
+            # other namespaces on a shared cluster.
             - -namespaces=afriflow
+            # Enable leader election so that if the operator is restarted
+            # or a second replica starts, only one instance reconciles at
+            # a time, preventing duplicate pod creation.
             - -leader-election=true
             - -leader-election-lock-name=spark-operator-lock
+            # Leader election lease stored as a ConfigMap in afriflow — no
+            # cluster-level coordination object is needed.
             - -leader-election-lock-namespace=afriflow
+            # Ingress URL template for Spark UI access: resolves to a
+            # cluster-internal service URL per application.
             - -ingress-url-format={{.IngressName}}.{{.Namespace}}.svc.cluster.local
+            # Target namespace for launched Spark job pods, matching the
+            # operator's watch namespace.
             - -spark-job-namespaces=afriflow
           ports:
+            # Metrics port for Prometheus scraping.
             - name: metrics
               containerPort: 10254
               protocol: TCP
           env:
+            # Downward API: passes the operator's own namespace to the
+            # process so it can construct fully-qualified resource names
+            # without hard-coding the namespace string.
             - name: SPARK_OPERATOR_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            # Explicitly enable the admission webhook inside the container.
             - name: SPARK_APPLICATION_WEBHOOK_ENABLE
               value: "true"
+            # Webhook HTTP server port inside the container. The Service
+            # maps external port 443 → this port 8080.
             - name: SPARK_APPLICATION_WEBHOOK_PORT
               value: "8080"
+            # Name of the Secret containing the TLS certificate for the
+            # webhook — generated by cert-manager (Certificate resource below).
             - name: SPARK_APPLICATION_WEBHOOK_SECRET_NAME
               value: spark-webhook-certs
           resources:
             requests:
+              # 200m CPU and 512 MiB memory are sufficient for the operator
+              # reconcile loop under normal load (< 50 concurrent SparkApplications).
               cpu: "200m"
               memory: "512Mi"
             limits:
+              # Allow bursting to 500m CPU during startup and large batch
+              # of reconcile events. 1 GiB memory cap prevents the operator
+              # from consuming cluster resources during memory leaks.
               cpu: "500m"
               memory: "1Gi"
           livenessProbe:
+            # /healthz returns 200 when the operator's controller loop is
+            # running and the leader election lock is held.
             httpGet:
               path: /healthz
               port: 10254
+            # 60-second delay: the operator needs time to load its CRD
+            # informer caches and acquire the leader lock before it can
+            # report healthy.
             initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 5
           readinessProbe:
+            # /readyz returns 200 when the operator is ready to accept
+            # admission webhook calls from the API server.
             httpGet:
               path: /readyz
               port: 10254
@@ -221,23 +358,33 @@ spec:
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
+            # The operator only reads its webhook cert from a mounted Secret
+            # and writes to stdout/stderr, so a read-only rootfs is safe.
             readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
           volumeMounts:
+            # Mount the webhook TLS cert so the operator's HTTPS server
+            # can present a valid certificate to the API server.
             - name: webhook-certs
               mountPath: /etc/webhook-certs
               readOnly: true
-      
+
       volumes:
+        # TLS certificate and key for the admission webhook HTTPS server.
+        # Generated by cert-manager via the Certificate resource below.
         - name: webhook-certs
           secret:
             secretName: spark-webhook-certs
+            # 0644 is sufficient — the cert is read-only and the private
+            # key does not need execute permissions.
             defaultMode: 0644
-      
+
       affinity:
         podAntiAffinity:
+          # Soft anti-affinity spreads operator pods across nodes to reduce
+          # the risk of the operator being unavailable during a node failure.
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
               podAffinityTerm:
@@ -246,20 +393,32 @@ spec:
                     app: spark-operator
                     app.kubernetes.io/name: spark-operator
                 topologyKey: kubernetes.io/hostname
-      
+
+      # Target the central-hub node pool which has higher CPU/memory and
+      # stable networking — suitable for a long-running controller process
+      # that manages many batch job pods.
       nodeSelector:
         afriflow/node-type: central-hub
-      
+
       tolerations:
+        # Allow scheduling on nodes tainted for batch workloads so the
+        # operator co-locates with the jobs it manages, reducing latency
+        # for pod-creation API calls.
         - key: "workload"
           operator: "Equal"
           value: "batch"
           effect: "NoSchedule"
-      
+
+      # 60 seconds lets the operator finish any in-progress reconcile
+      # loop and release the leader election lock cleanly, preventing
+      # a lock timeout delay for the replacement pod.
       terminationGracePeriodSeconds: 60
 
 ---
 # Spark Operator Service (for webhook)
+# Exposes the admission webhook HTTPS server to the Kubernetes API server.
+# Port 443 is required by the API server when calling admission webhooks;
+# the Service redirects to the operator container's port 8080 internally.
 apiVersion: v1
 kind: Service
 metadata:
@@ -270,10 +429,18 @@ metadata:
     app.kubernetes.io/name: spark-operator
     app.kubernetes.io/component: webhook
 spec:
+  # ClusterIP restricts webhook access to inside the cluster. The
+  # Kubernetes API server reaches it via the cluster-internal DNS name
+  # spark-operator-webhook.afriflow.svc.cluster.local.
   type: ClusterIP
   ports:
     - name: webhook
+      # Port 443 is the conventional HTTPS port expected by Kubernetes
+      # admission webhook callers.
       port: 443
+      # The operator's container HTTPS server listens on 8080; the Service
+      # handles the 443 → 8080 mapping so the container does not need to
+      # run as root to bind a privileged port.
       targetPort: 8080
       protocol: TCP
   selector:
@@ -283,6 +450,9 @@ spec:
 
 ---
 # Certificate for Webhook (using cert-manager)
+# cert-manager automates the issuance and renewal of the TLS certificate
+# used by the admission webhook HTTPS server. Without this, operators would
+# need to manually rotate certificates, which is error-prone.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -292,16 +462,28 @@ metadata:
     app: spark-operator
     app.kubernetes.io/name: spark-operator
 spec:
+  # The API server calls the webhook using this DNS name, so the cert
+  # must cover both the short service name and the FQDN. Both forms
+  # are used by different API server implementations.
   dnsNames:
     - spark-operator-webhook.afriflow.svc
     - spark-operator-webhook.afriflow.svc.cluster.local
   issuerRef:
     kind: Issuer
+    # Reference the self-signed issuer defined below. For production,
+    # consider replacing with an intermediate CA issuer from cert-manager
+    # to enable certificate chain validation.
     name: spark-selfsigned-issuer
+  # The certificate and private key are stored in this Secret. The operator
+  # mounts this Secret as /etc/webhook-certs.
   secretName: spark-webhook-certs
 
 ---
 # Self-signed Issuer for Webhook Certificate
+# A self-signed issuer is appropriate for admission webhooks because the
+# API server validates the certificate using the caBundle field in the
+# WebhookConfiguration rather than the system trust store. There is no
+# need for an external CA.
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
@@ -311,10 +493,19 @@ metadata:
     app: spark-operator
     app.kubernetes.io/name: spark-operator
 spec:
+  # selfSigned: {} generates certificates signed by their own private key.
+  # The caBundle in the Webhook resources below must be updated with the
+  # CA certificate after cert-manager issues it (typically done by a
+  # cert-manager cainjector).
   selfSigned: {}
 
 ---
 # MutatingWebhookConfiguration for Spark Applications
+# Intercepts SparkApplication CREATE and UPDATE calls to inject default
+# configuration (e.g. driver labels, executor env vars, monitoring settings)
+# into the submitted objects before they are persisted. This enables
+# organisation-wide defaults to be applied centrally without each job author
+# having to specify them.
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
@@ -324,27 +515,47 @@ metadata:
     app.kubernetes.io/name: spark-operator
 webhooks:
   - name: mutate-sparkoperator-k8s-io-v1beta2-sparkapplication
+    # Support both v1 and v1beta1 AdmissionReview API versions for
+    # compatibility with older Kubernetes clusters.
     admissionReviewVersions: ["v1", "v1beta1"]
+    # None: the webhook has no side effects outside the Kubernetes API
+    # (required for dry-run requests to work correctly).
     sideEffects: None
+    # 10-second timeout: if the webhook does not respond within 10 seconds
+    # the API server applies the failurePolicy. Keep tight to avoid slowing
+    # down kubectl apply operations.
     timeoutSeconds: 10
+    # Fail closed: if the webhook is unreachable, reject the SparkApplication
+    # submission rather than allowing it through without mutation. This
+    # ensures monitoring defaults are always applied.
     failurePolicy: Fail
     clientConfig:
       service:
         name: spark-operator-webhook
         namespace: afriflow
         path: /mutate-sparkoperator-k8s-io-v1beta2-sparkapplication
+      # caBundle is left empty here; cert-manager's cainjector will
+      # populate it automatically after the Certificate is issued.
       caBundle: ""
     rules:
+      # Only trigger for SparkApplication resources — not for Pods or
+      # other objects, minimising the blast radius of any webhook errors.
       - apiGroups: ["sparkoperator.k8s.io"]
         apiVersions: ["v1beta2"]
         operations: ["CREATE", "UPDATE"]
         resources: ["sparkapplications"]
     namespaceSelector:
+      # Restrict to the afriflow namespace so the webhook is not invoked
+      # for SparkApplications in other namespaces (e.g. kube-system).
       matchLabels:
         name: afriflow
 
 ---
 # ValidatingWebhookConfiguration for Spark Applications
+# Validates SparkApplication objects after mutation to ensure they conform
+# to AfriFlow's schema requirements (e.g. valid resource limits, required
+# labels). Runs after the mutating webhook so validation sees the final
+# state of the object.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
@@ -357,6 +568,8 @@ webhooks:
     admissionReviewVersions: ["v1", "v1beta1"]
     sideEffects: None
     timeoutSeconds: 10
+    # Fail closed: invalid SparkApplications should never be persisted,
+    # as they would produce failed pods and waste cluster resources.
     failurePolicy: Fail
     clientConfig:
       service:
@@ -375,6 +588,10 @@ webhooks:
 
 ---
 # Default SparkApplication CRD Template
+# A reference SparkApplication that demonstrates the standard configuration
+# for Python (PySpark) batch jobs in AfriFlow. Domain engineers copy this
+# template and customise the mainApplicationFile, resource sizes, and
+# environment variables for their specific ETL jobs.
 apiVersion: sparkoperator.k8s.io/v1beta2
 kind: SparkApplication
 metadata:
@@ -383,28 +600,54 @@ metadata:
   labels:
     app: spark-operator
     app.kubernetes.io/name: spark-operator
+    # "template" component label marks this as a reference manifest, not
+    # a live production job.
     app.kubernetes.io/component: template
 spec:
+  # Python (PySpark) job type. Alternatives are Java and Scala.
   type: Python
+  # Cluster mode: the driver runs inside the Kubernetes cluster rather
+  # than on the submitting machine. Required for operator-managed jobs.
   mode: cluster
+  # Spark 3.5.0 with Python 3.9 — matches the Spark version in the
+  # operator and the Python version used across AfriFlow domain scripts.
   image: apache/spark:3.5.0-python3.9
   imagePullPolicy: IfNotPresent
+  # Placeholder main file; each domain job overrides this with its own
+  # PySpark script path (typically an s3a:// URI or a bundled local path).
   mainApplicationFile: local:///opt/spark/examples/src/main/python/pi.py
   sparkVersion: "3.5.0"
   restartPolicy:
+    # OnFailure: restart the job if it exits with a non-zero code, but do
+    # not restart if it was explicitly stopped (unlike Always).
     type: OnFailure
+    # Up to 3 failure retries with 10-second intervals handle transient
+    # errors (e.g. S3 throttling, Kafka broker restarts) without looping
+    # indefinitely on hard errors.
     onFailureRetries: 3
     onFailureRetryInterval: 10
     onSubmissionFailureRetries: 3
     onSubmissionFailureRetryInterval: 10
   driver:
+    # 1 core for the driver: the driver only orchestrates task submission
+    # and collects results; it does not perform heavy computation. The
+    # 1200m core limit gives a small burst margin.
     cores: 1
     coreLimit: "1200m"
+    # 2 GiB driver memory: sufficient for the driver JVM, broadcast
+    # variables, and result collection from executors.
     memory: "2048m"
     labels:
       version: 3.5.0
+    # Use the spark-application ServiceAccount (not spark-operator) so
+    # the driver pod has only the permissions needed to create executor
+    # pods, not operator-level cluster access.
     serviceAccount: spark-application
     env:
+      # AWS credentials injected from a Secret so they are never hard-coded
+      # in the SparkApplication manifest. The optional: true flag prevents
+      # job submission failure in environments where the Secret does not
+      # exist (e.g. when using IAM roles for service accounts instead).
       - name: AWS_ACCESS_KEY_ID
         valueFrom:
           secretKeyRef:
@@ -418,14 +661,27 @@ spec:
             key: AWS_SECRET_ACCESS_KEY
             optional: true
     volumeMounts:
+      # Mount Spark configuration files (spark-defaults.conf) into the
+      # driver so it picks up S3 settings, AQE configuration, etc.
       - name: spark-config
         mountPath: /opt/spark/conf
+      # Read-only secrets mount provides additional credentials or
+      # config files without exposing them as environment variables.
       - name: spark-secrets
         mountPath: /etc/spark-secrets
         readOnly: true
   executor:
+    # 2 cores per executor balances task parallelism with pod count.
+    # More cores per executor reduces pod scheduling overhead for large
+    # datasets; fewer cores increases parallelism on small datasets.
     cores: 2
+    # 2 executor instances as the starting point; dynamic allocation
+    # (below) scales this up to 10 based on pending task backlog.
     instances: 2
+    # 4 GiB per executor: sized for AfriFlow's largest join operations
+    # (entity resolution across millions of records). Smaller datasets
+    # use less memory due to JVM heap fragmentation, but this sets the
+    # upper bound for the Kubernetes resource request.
     memory: "4096m"
     labels:
       version: 3.5.0
@@ -449,29 +705,52 @@ spec:
         mountPath: /etc/spark-secrets
         readOnly: true
   dynamicAllocation:
+    # Dynamic Allocation (DA) scales executor count based on pending tasks,
+    # reducing cluster cost during idle periods while still bursting for
+    # large batch windows (e.g. end-of-day reconciliation jobs).
     enabled: true
+    # Start with 2 executors to reduce cold-start latency for the first
+    # batch of tasks.
     initialExecutors: 2
+    # Never scale below 1 executor so the driver can always make progress
+    # on small or straggling partitions.
     minExecutors: 1
+    # Cap at 10 executors to bound cluster resource consumption. Each
+    # executor uses 2 cores + 4 GiB = 20 cores + 40 GiB maximum.
     maxExecutors: 10
   volumes:
+    # ConfigMap volume providing spark-defaults.conf to driver and executors.
     - name: spark-config
       configMap:
         name: spark-default-config
+    # Secret volume for AWS credentials. optional: true means the job
+    # still launches if the Secret is absent (e.g. in CI environments
+    # using mocked S3).
     - name: spark-secrets
       secret:
         secretName: spark-aws-credentials
         optional: true
   monitoring:
+    # Expose JMX metrics from both driver and executor pods so Prometheus
+    # can scrape per-job performance data (e.g. shuffle read/write bytes,
+    # GC time, task duration).
     exposeDriverMetrics: true
     exposeExecutorMetrics: true
     prometheus:
+      # Path to the JMX exporter JAR bundled inside the Spark image.
       jmxExporterJar: "/prometheus/jmx_exporter.jar"
+      # Port 8090 is chosen to avoid conflicts with Flink's 9249 metrics
+      # port on nodes that run both Spark and Flink pods.
       port: 8090
       portName: metrics
       protocol: HTTP
 
 ---
 # ConfigMap for Spark Default Configuration
+# Central store for spark-defaults.conf settings applied to every
+# SparkApplication via the driver/executor volume mounts above. Keeping
+# these defaults here (rather than baking them into the image) allows
+# updates without rebuilding the Spark Docker image.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -483,22 +762,44 @@ metadata:
 data:
   spark-defaults.conf: |
     # Spark Configuration
+    # Write event logs to S3 so the Spark History Server can replay job
+    # DAGs and task timelines for post-mortem analysis.
     spark.eventLog.enabled=true
     spark.eventLog.dir=s3a://afriflow-spark-logs/
     spark.history.fs.logDirectory=s3a://afriflow-spark-logs/
+    # S3A file system implementation from the Hadoop AWS module. Required
+    # for s3a:// URIs used in event logs and data paths.
     spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem
+    # WebIdentityTokenCredentialProvider uses IAM Roles for Service Accounts
+    # (IRSA) on EKS, avoiding long-lived static credentials in Secrets.
     spark.hadoop.fs.s3a.aws.credentials.provider=com.amazonaws.auth.WebIdentityTokenCredentialProvider
+    # Standardise pod naming so log aggregators and monitoring tools can
+    # correlate pod names with SparkApplication names automatically.
     spark.kubernetes.driver.pod.name={{.SparkApplicationName}}-driver
     spark.kubernetes.executor.pod.name={{.SparkApplicationName}}-{{.ExecutorID}}-exec
     spark.kubernetes.container.image.pullPolicy=IfNotPresent
+    # Assign spark-application ServiceAccount to both driver and executor
+    # pods for consistent RBAC across the job lifecycle.
     spark.kubernetes.authenticate.driver.serviceAccountName=spark-application
     spark.kubernetes.authenticate.executor.serviceAccountName=spark-application
+    # Adaptive Query Execution (AQE) automatically coalesces small shuffle
+    # partitions after each stage, reducing the overhead of writing and
+    # reading thousands of tiny files — critical for AfriFlow's entity
+    # resolution jobs that produce many small partitions.
     spark.sql.adaptive.enabled=true
     spark.sql.adaptive.coalescePartitions.enabled=true
+    # AQE skew join mitigation splits oversized partitions at runtime,
+    # preventing a single hot partition from becoming a straggler task
+    # that delays the entire job.
     spark.sql.adaptive.skewJoin.enabled=true
 
 ---
 # Secret for AWS/S3 Credentials (Template - to be populated)
+# Placeholder Secret that CI/CD or Vault agent replaces with real credentials
+# before deployment. The "placeholder" values ensure the manifest is valid
+# YAML and can be applied in dry-run mode without a real Secret injector.
+# In production, this Secret should be managed by External Secrets Operator
+# or AWS Secrets Manager, not stored in Git.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -507,14 +808,21 @@ metadata:
   labels:
     app: spark-operator
     app.kubernetes.io/name: spark-operator
+# Opaque type for arbitrary key-value pairs; the keys are referenced by
+# name in the SparkApplication env.secretKeyRef sections above.
 type: Opaque
 stringData:
   AWS_ACCESS_KEY_ID: "placeholder"
   AWS_SECRET_ACCESS_KEY: "placeholder"
+  # af-south-1 is the AWS region hosting AfriFlow's primary data lake
+  # (Cape Town region, closest to the South African primary deployment).
   AWS_DEFAULT_REGION: "af-south-1"
 
 ---
 # PersistentVolumeClaim for Spark Logs
+# Local staging area for Spark event logs before they are uploaded to S3.
+# Provides a fast local write path so event logging does not introduce
+# S3 latency into the critical path of task execution.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -524,15 +832,22 @@ metadata:
     app: spark-operator
     app.kubernetes.io/name: spark-operator
 spec:
+  # ReadWriteMany: multiple driver pods (one per concurrent job) write
+  # event logs simultaneously to the same volume.
   accessModes:
     - ReadWriteMany
   storageClassName: gp3-ssd
   resources:
     requests:
+      # 100 GiB accommodates event logs for dozens of concurrent batch
+      # jobs before the background S3 upload clears the local cache.
       storage: 100Gi
 
 ---
 # PodDisruptionBudget for Spark Operator
+# Ensures the operator pod is not evicted during voluntary disruptions
+# (e.g. node drain for maintenance), which would leave in-flight
+# SparkApplications without a reconciler and potentially orphan their pods.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -542,6 +857,8 @@ metadata:
     app: spark-operator
     app.kubernetes.io/name: spark-operator
 spec:
+  # minAvailable: 1 with replicas: 1 blocks the node drain until the
+  # operator has been rescheduled on another node and is running again.
   minAvailable: 1
   selector:
     matchLabels:
@@ -551,6 +868,9 @@ spec:
 
 ---
 # Prometheus ServiceMonitor for Spark Operator
+# Tells the Prometheus Operator to scrape the spark-operator metrics
+# endpoint. Using a ServiceMonitor CRD (rather than pod annotations alone)
+# provides a more reliable and version-controlled scrape configuration.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -559,17 +879,28 @@ metadata:
   labels:
     app: spark-operator
     app.kubernetes.io/name: spark-operator
+    # "release: prometheus" is the label that the Prometheus Operator uses
+    # to discover ServiceMonitor objects; it must match the Prometheus CR's
+    # serviceMonitorSelector.
     release: prometheus
 spec:
   selector:
+    # Match the spark-operator Service labels so the monitor targets the
+    # correct Service endpoint.
     matchLabels:
       app: spark-operator
       app.kubernetes.io/name: spark-operator
   namespaceSelector:
     matchNames:
+      # Explicitly scope to afriflow to prevent the monitor from accidentally
+      # matching identically-labelled Services in other namespaces.
       - afriflow
   endpoints:
     - port: metrics
       path: /metrics
+      # Scrape every 30 seconds — frequent enough for operational alerting
+      # without generating excessive Prometheus storage cardinality.
       interval: 30s
+      # Abort scrapes that take longer than 10 seconds to avoid Prometheus
+      # worker thread starvation during operator slowdowns.
       scrapeTimeout: 10s

@@ -1,4 +1,10 @@
-﻿# 14 Competitive Analysis
+<!--
+@file 14_COMPETITIVE_ANALYSIS.md
+@description Competitive landscape analysis contrasting AfriFlow against common alternatives
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 14 Competitive Analysis
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

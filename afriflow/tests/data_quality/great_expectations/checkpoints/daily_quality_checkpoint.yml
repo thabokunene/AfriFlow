@@ -1,0 +1,14 @@
+# =============================================================================
+# @file daily_quality_checkpoint.yml
+# @description Great Expectations checkpoint configuration for daily data
+#     quality validation across all AfriFlow domains. Defines validation suite
+#     execution schedule, data source connections, and notification settings
+#     for automated quality monitoring. Ensures data consistency and integrity
+#     across CIB, PBB, Insurance, Forex, and Cell network data pipelines.
+# @author Thabo Kunene
+# @created 2026-03-18
+# =============================================================================
+
+# Great Expectations checkpoint configuration for daily data quality validation
+# This file defines the validation suite execution parameters and notification
+# settings for automated data quality monitoring across all AfriFlow domains

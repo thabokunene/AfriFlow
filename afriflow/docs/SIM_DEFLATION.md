@@ -1,3 +1,9 @@
+<!--
+@file SIM_DEFLATION.md
+@description SIM-to-employee deflation model assumptions, factors, and calibration rationale
+@author Thabo Kunene
+@created 2026-03-17
+-->
 <!-- docs/SIM_DEFLATION.md -->
 
 # AfriFlow SIM to Employee Deflation Model

@@ -1,4 +1,10 @@
-﻿# 09 Currency Event Propagation
+<!--
+@file 09_CURRENCY_EVENT_PROPAGATION.md
+@description Rules for propagating currency events across domains and signal pipelines
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 09 Currency Event Propagation
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

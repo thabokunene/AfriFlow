@@ -9,7 +9,8 @@
       "Bash(for f:*)",
       "Bash(python:*)",
       "Bash(python3:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(echo \"EXIT:$?\")"
     ]
   }
 }

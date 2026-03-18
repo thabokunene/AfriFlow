@@ -1,3 +1,7 @@
+# @file data_shadow_rules.yml
+# @description Cross-domain data shadow detection rules for competitive leakage and coverage gap identification
+# @author Thabo Kunene
+# @created 2026-03-17
 # config/data_shadow_rules.yml
 
 # Data shadow detection rules.
@@ -6,77 +10,90 @@
 # DISCLAIMER: This project is not sanctioned by, affiliated with, or
 # endorsed by Standard Bank Group, MTN Group, or any of their subsidiaries.
 
+# Shadow detection rules identify missing cross-domain relationships indicating business opportunities
 rules:
+  # Foreign exchange hedging opportunity detection
+  # Companies making foreign currency payments should hedge FX risk
   - name: cib_implies_forex
     description: >
       If a client has CIB payments in a foreign currency,
       we expect corresponding forex hedging activity.
     source_domain: cib
     expected_domain: forex
-    condition: "cib.corridors contains foreign currency payments"
-    confidence: 0.85
-    shadow_category: COMPETITIVE_LEAKAGE
-    revenue_estimation_method: "0.3% of estimated unhedged exposure"
+    condition: "cib.corridors contains foreign currency payments"  # Check payment currency diversity
+    confidence: 0.85  # High confidence - FX hedging is standard practice
+    shadow_category: COMPETITIVE_LEAKAGE  # Client using competitor for FX services
+    revenue_estimation_method: "0.3% of estimated unhedged exposure"  # Typical FX margin
 
+  # Cell network partnership opportunity detection
+  # Companies operating in MTN countries should use MTN corporate services
   - name: cib_implies_cell
     description: >
       If a client has CIB activity in a country where MTN operates,
       we expect cell data showing corporate SIM presence.
     source_domain: cib
     expected_domain: cell
-    condition: "cib.active_countries intersects mtn.coverage_countries"
-    confidence: 0.70
-    shadow_category: COMPETITIVE_LEAKAGE
-    revenue_estimation_method: "estimated telco revenue share"
+    condition: "cib.active_countries intersects mtn.coverage_countries"  # Cross-reference country lists
+    confidence: 0.70  # Medium confidence - some companies use competitor networks
+    shadow_category: COMPETITIVE_LEAKAGE  # Client using competitor telco services
+    revenue_estimation_method: "estimated telco revenue share"  # Corporate mobile services revenue
 
+  # Payroll banking opportunity detection
+  # Large corporate SIM deployments indicate substantial workforce
   - name: cell_implies_pbb
     description: >
       If a client has 50 or more corporate SIMs (employees),
       we expect those employees to have PBB payroll accounts.
     source_domain: cell
     expected_domain: pbb
-    condition: "cell.corporate_sim_count >= 50"
-    confidence: 0.75
-    shadow_category: COMPETITIVE_LEAKAGE
-    revenue_estimation_method: "R2500 per deflated employee per year"
+    condition: "cell.corporate_sim_count >= 50"  # Threshold based on workforce size
+    confidence: 0.75  # High confidence - large workforces need payroll services
+    shadow_category: COMPETITIVE_LEAKAGE  # Client using competitor for payroll services
+    revenue_estimation_method: "R2500 per deflated employee per year"  # Annual payroll revenue per employee
 
+  # Insurance coverage opportunity detection
+  # Companies with physical operations need asset and liability insurance
   - name: cib_implies_insurance
     description: >
       If a client has significant CIB activity with supplier payments
       indicating physical operations, we expect insurance coverage.
     source_domain: cib
     expected_domain: insurance
-    condition: "cib.annual_value > 10M and cib.payment_types includes SUPPLIER"
-    confidence: 0.65
-    shadow_category: COVERAGE_GAP
-    revenue_estimation_method: "0.2% of estimated asset value"
+    condition: "cib.annual_value > 10M and cib.payment_types includes SUPPLIER"  # Physical operations indicator
+    confidence: 0.65  # Medium confidence - not all operations need insurance
+    shadow_category: COVERAGE_GAP  # Client lacks adequate insurance coverage
+    revenue_estimation_method: "0.2% of estimated asset value"  # Insurance premium rate
 
+  # FX hedging coverage gap detection
+  # High FX spot activity with low hedge coverage indicates risk management gap
   - name: cib_forex_hedge_gap
     description: >
       If a client trades FX spot regularly but has low forward
       or option coverage, they may be carrying unhedged exposure.
     source_domain: forex
     expected_domain: forex
-    condition: "forex.spot_volume_90d > 50M and hedge_ratio < 30%"
-    confidence: 0.80
-    shadow_category: COVERAGE_GAP
-    revenue_estimation_method: "0.2% of unhedged notional"
+    condition: "forex.spot_volume_90d > 50M and hedge_ratio < 30%"  # High volume, low coverage
+    confidence: 0.80  # High confidence - clear hedging gap indicator
+    shadow_category: COVERAGE_GAP  # Client needs better FX risk management
+    revenue_estimation_method: "0.2% of unhedged notional"  # Hedging product margin
 
+# MTN operational countries for cross-domain shadow detection
+# These countries have MTN network coverage enabling cell data partnerships
 mtn_coverage_countries:
-  - ZA
-  - NG
-  - GH
-  - UG
-  - RW
-  - ZM
-  - MZ
-  - CI
-  - CM
-  - BJ
-  - CG
-  - GW
-  - LR
-  - SD
-  - SS
-  - SZ
-  - BW
+  - ZA  # South Africa - tier 1 real-time integration
+  - NG  # Nigeria - tier 2 daily batch integration
+  - GH  # Ghana - tier 2 daily batch integration
+  - UG  # Uganda - tier 2 daily batch integration
+  - RW  # Rwanda - tier 2 daily batch integration
+  - ZM  # Zambia - tier 3 monthly integration
+  - MZ  # Mozambique - tier 3 monthly integration
+  - CI  # Côte d'Ivoire - tier 3 monthly integration
+  - CM  # Cameroon - tier 3 monthly integration
+  - BJ  # Benin - tier 3 monthly integration
+  - CG  # Republic of Congo - tier 3 monthly integration
+  - GW  # Guinea-Bissau - tier 3 monthly integration
+  - LR  # Liberia - tier 3 monthly integration
+  - SD  # Sudan - tier 3 monthly integration
+  - SS  # South Sudan - tier 3 monthly integration
+  - SZ  # Eswatini - tier 3 monthly integration
+  - BW  # Botswana - tier 3 monthly integration

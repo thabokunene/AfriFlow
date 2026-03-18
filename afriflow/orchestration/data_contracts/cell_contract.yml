@@ -1,3 +1,7 @@
+# @file cell_contract.yml
+# @description Data contract for Cell Network (MTN Partnership) domain integration
+# @author Thabo Kunene
+# @created 2026-03-17
 # orchestration/data_contracts/cell_contract.yml
 #
 # Data contract for the Cell Network (MTN Partnership)
@@ -7,12 +11,8 @@
 # data feed maturity varies by country. The contract
 # specifies minimum requirements for each tier.
 #
-# Disclaimer:
-#   This project is not sanctioned by, affiliated with,
-#   or endorsed by Standard Bank Group, MTN Group, or
-#   any affiliated entity. It is a demonstration of
-#   concept, domain knowledge, and data engineering
-#   skill by Thabo Kunene.
+# DISCLAIMER: This project is not sanctioned by, affiliated with, or
+# endorsed by Standard Bank Group, MTN Group, or any of their subsidiaries.
 
 contract:
   name: "Cell Network Data Contract"

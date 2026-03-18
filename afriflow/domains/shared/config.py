@@ -1,4 +1,11 @@
 """
+@file config.py
+@description Centralized environment-driven configuration loader for AfriFlow domains
+@author Thabo Kunene
+@created 2026-03-17
+"""
+
+"""
 AfriFlow Shared Configuration.
 
 We provide centralized configuration management for all
@@ -11,12 +18,12 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
-import os
+import os  # Environment variable access for deployment-specific configuration
 from dataclasses import dataclass
 from typing import Optional
-import logging
+import logging  # Operational logs for configuration loading and validation behavior
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)  # Module-level logger for config lifecycle events
 
 
 @dataclass
@@ -112,6 +119,7 @@ def get_config() -> AppConfig:
     """
     global config
     if config is None:
+        # Lazy-load configuration so libraries can import safely without requiring env at import time
         config = AppConfig.load()
     return config
 

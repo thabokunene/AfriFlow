@@ -1,3 +1,9 @@
+<!--
+@file IMPORT_CONVENTION.md
+@description Import conventions for CIB modules using absolute afriflow package paths
+@author Thabo Kunene
+@created 2026-03-17
+-->
 # CIB Import Convention
 
 This project standardizes all CIB module imports to **absolute imports from the project root package `afriflow`**.

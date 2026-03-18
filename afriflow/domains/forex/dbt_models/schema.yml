@@ -1,0 +1,20 @@
+# =============================================================================
+# @file schema.yml
+# @description Foreign Exchange domain dbt schema definitions for FX trading
+#     data models including currency pairs, exchange rates, hedging instruments,
+#     and market analytics. Defines data quality tests and regulatory validation
+#     rules for foreign exchange data pipelines.
+# @author Thabo Kunene
+# @created 2026-03-18
+# =============================================================================
+
+version: 2
+
+#
+# Forex Domain dbt Schema Definitions
+#
+# We define tests, documentation, and column metadata
+# for all Forex domain models.
+#
+# Disclaimer: This project is not sanctioned by Standard Bank Group.
+#

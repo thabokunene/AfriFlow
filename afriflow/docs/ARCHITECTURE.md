@@ -1,4 +1,9 @@
-<!-- docs/ARCHITECTURE.md -->
+<!--
+@file ARCHITECTURE.md
+@description Technical architecture overview covering stack, data flows, and governance
+@author Thabo Kunene
+@created 2026-03-17
+-->
 
 # AfriFlow Technical Architecture
 

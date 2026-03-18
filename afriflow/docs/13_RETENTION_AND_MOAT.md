@@ -1,4 +1,10 @@
-﻿# 13 Retention and Moat
+<!--
+@file 13_RETENTION_AND_MOAT.md
+@description Retention strategies and sustainable moat formation across integrated workflows
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 13 Retention and Moat
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

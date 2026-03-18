@@ -1,10 +1,11 @@
 import argparse
+import fnmatch
 import json
 import os
 import re
-import time
-import fnmatch
 import subprocess
+import sys
+import time
 from typing import Any, Dict, List, Tuple
 
 
@@ -86,13 +87,16 @@ def _run_gate(
     line_min = gates.get("line_min", 0)
     branch_min = _effective_threshold(gates.get("branch_min", 0), cond.get("branch_gate_env"))
     func_min = _effective_threshold(gates.get("func_min", 0), cond.get("function_gate_env"))
-    include_subpath = subtree["path"]
+    # coverage_subpath overrides path for XML matching; path uses the domains/ prefix
+    # which is correct for git-diff change detection but wrong for coverage.xml paths
+    # (XML paths are relative to afriflow/domains/, not afriflow/).
+    include_subpath = gates.get("coverage_subpath", subtree["path"])
     include_file_pattern = gates.get("include_file_pattern")
     write_md = gates.get("write_md", f"coverage/{subtree['name']}_coverage.md")
     write_json = gates.get("write_json", f"coverage/{subtree['name']}_coverage_summary.json")
     t0 = time.time()
     cmd = [
-        "python",
+        sys.executable,
         "scripts/cell_coverage_report.py",
         "--xml",
         cov_xml,

@@ -1,3 +1,9 @@
+<!--
+@file SEASONAL_ADJUSTMENT.md
+@description Seasonal adjustment framework and calendars for reducing false positives in signals
+@author Thabo Kunene
+@created 2026-03-17
+-->
 <!-- docs/SEASONAL_ADJUSTMENT.md -->
 
 # AfriFlow Seasonal Adjustment Framework

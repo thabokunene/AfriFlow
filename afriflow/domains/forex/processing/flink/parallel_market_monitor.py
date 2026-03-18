@@ -1,4 +1,11 @@
 """
+@file parallel_market_monitor.py
+@description Monitors parallel FX premiums, trends, and alerts with RBAC and structured logging
+@author Thabo Kunene
+@created 2026-03-17
+"""
+
+"""
 Parallel Market Monitor (Forex, Flink-style).
 
 We monitor divergence between official and parallel

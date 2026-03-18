@@ -1,4 +1,10 @@
-﻿# 04 Entity Resolution
+<!--
+@file 04_ENTITY_RESOLUTION.md
+@description Cross-system entity resolution approach and constraints for enterprise clients
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 04 Entity Resolution
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

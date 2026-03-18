@@ -1,4 +1,9 @@
-<!-- docs/RM_BRIEFING.md -->
+<!--
+@file RM_BRIEFING.md
+@description RM pre-meeting briefing specification and data sources per section
+@author Thabo Kunene
+@created 2026-03-17
+-->
 
 # RM Pre-Meeting Briefing System
 

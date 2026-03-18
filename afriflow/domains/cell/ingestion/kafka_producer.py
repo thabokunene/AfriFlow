@@ -1,4 +1,11 @@
 """
+@file kafka_producer.py
+@description Kafka producer for Cell domain ingestion with retries, batching, and Avro/JSON serialization
+@author Thabo Kunene
+@created 2026-03-17
+"""
+
+"""
 Kafka Producer for Cell Domain Ingestion
 
 Usage:
@@ -13,27 +20,27 @@ Usage:
     producer.flush()
 """
 
-from __future__ import annotations
+from __future__ import annotations  # forward references for type hints in class methods
 
-import json
-import os
-import threading
-import time
+import json  # JSON encoding for default payload serialization
+import os  # environment-driven runtime configuration for logging and bootstrap
+import threading  # thread-safe producer pool access and delivery callbacks
+import time  # exponential backoff calculation during retry
 from dataclasses import dataclass
-from logging.handlers import RotatingFileHandler
+from logging.handlers import RotatingFileHandler  # file rotation for ingestion logs
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from afriflow.logging_config import get_logger
+from afriflow.logging_config import get_logger  # structured JSON logging with correlation IDs
 
 try:
-    from confluent_kafka import Producer, KafkaException
+    from confluent_kafka import Producer, KafkaException  # high-performance Kafka client for production use
 except Exception:  # pragma: no cover
     Producer = None
     KafkaException = Exception
 
 try:
-    from fastavro import writer as avro_writer, parse_schema
-    from io import BytesIO
+    from fastavro import writer as avro_writer, parse_schema  # efficient Avro serialization when schema provided
+    from io import BytesIO  # buffer for Avro writer output
 except Exception:  # pragma: no cover
     avro_writer = None
     parse_schema = None
@@ -41,6 +48,7 @@ except Exception:  # pragma: no cover
 
 
 def _setup_rotating_logger(name: str) -> Any:
+    # Configure a rotating file logger to capture ingestion-specific operational logs
     logger = get_logger(name)
     log_file = os.environ.get("AF_CELL_KAFKA_LOG_FILE", "logs/cell_kafka_producer.log")
     max_bytes = int(os.environ.get("AF_CELL_KAFKA_LOG_MAX_BYTES", "1048576"))
@@ -54,6 +62,7 @@ def _setup_rotating_logger(name: str) -> Any:
 
 @dataclass
 class KafkaConfig:
+    # Minimal producer config with safe defaults and optional SASL
     bootstrap_servers: str
     acks: str = "all"
     batch_size: int = 1000
@@ -70,6 +79,7 @@ class KafkaConfig:
 
     @classmethod
     def from_env(cls) -> "KafkaConfig":
+        # Build KafkaConfig from environment variables with defaults for local/dev
         return cls(
             bootstrap_servers=os.environ.get("AF_CELL_KAFKA_BOOTSTRAP", "localhost:9092"),
             acks=os.environ.get("AF_CELL_KAFKA_ACKS", "all"),
@@ -87,6 +97,7 @@ class KafkaConfig:
         )
 
     def to_producer_config(self) -> Dict[str, Any]:
+        # Translate dataclass fields to confluent_kafka Producer config dict
         cfg: Dict[str, Any] = {
             "bootstrap.servers": self.bootstrap_servers,
             "acks": self.acks,
@@ -111,6 +122,13 @@ class KafkaConfig:
 
 
 class CellKafkaProducer:
+    """
+    Domain-specific Kafka producer supporting:
+    - JSON or Avro serialization
+    - Batching with size threshold
+    - Retries with exponential backoff
+    - Structured logging for delivery outcomes
+    """
     def __init__(self, config: KafkaConfig) -> None:
         self.config = config
         self._logger = _setup_rotating_logger(__name__)
@@ -119,6 +137,10 @@ class CellKafkaProducer:
         self._failed: List[Tuple[str, bytes, Optional[str]]] = []
 
     def _get_producer(self) -> Any:
+        """
+        Lazily initialize and cache the confluent_kafka Producer.
+        Ensures thread-safe access via a lock to avoid double-initialization.
+        """
         with self._pool_lock:
             if self._producer is None:
                 if Producer is None:
@@ -127,6 +149,10 @@ class CellKafkaProducer:
             return self._producer
 
     def serialize(self, record: Dict[str, Any], avro_schema: Optional[Dict[str, Any]] = None) -> bytes:
+        """
+        Serialize records to bytes using Avro if a schema is provided; otherwise JSON.
+        Edge case: when Avro libs are unavailable, gracefully fall back to JSON.
+        """
         if avro_schema and avro_writer and parse_schema and BytesIO:
             parsed = parse_schema(avro_schema)
             buf = BytesIO()
@@ -135,6 +161,10 @@ class CellKafkaProducer:
         return json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
     def _delivery_cb(self, err, msg) -> None:
+        """
+        Delivery callback records success/failure and logs structured context.
+        On failure, appends payload to retry buffer for later backoff handling.
+        """
         if err is not None:
             self._logger.error("kafka_delivery_error", extra={"error": str(err), "topic": msg.topic(), "partition": msg.partition()})
             key = msg.key().decode("utf-8") if msg.key() else None
@@ -143,6 +173,12 @@ class CellKafkaProducer:
             self._logger.debug("kafka_delivery_ok", extra={"topic": msg.topic(), "partition": msg.partition(), "offset": msg.offset()})
 
     def send(self, topic: str, record: Dict[str, Any], key: Optional[str] = None, avro_schema: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Send a single record to Kafka with optional key and serialization format.
+        Error handling:
+        - KafkaException: logs and queues for retry
+        - Any unexpected exception: logs and queues for retry
+        """
         payload = self.serialize(record, avro_schema=avro_schema)
         try:
             producer = self._get_producer()
@@ -156,6 +192,11 @@ class CellKafkaProducer:
             self._failed.append((topic, payload, key))
 
     def batch_send(self, topic: str, records: Iterable[Dict[str, Any]], key_fn: Optional[Any] = None, avro_schema: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Batch send streaming records with size-based flush.
+        - key_fn: optional function deriving partition key from each record
+        After sending all batches, initiates retry on failures encountered.
+        """
         batch: List[Dict[str, Any]] = []
         for rec in records:
             batch.append(rec)
@@ -170,6 +211,10 @@ class CellKafkaProducer:
         self._retry_failed()
 
     def _retry_failed(self) -> None:
+        """
+        Exponential backoff retry loop for failed deliveries.
+        Doubles backoff per iteration; stops after configured retry count.
+        """
         if not self._failed:
             return
         tries = 0
@@ -191,5 +236,8 @@ class CellKafkaProducer:
             self._logger.error("kafka_failed_records_exhausted", extra={"count": len(self._failed)})
 
     def flush(self, timeout: float = 10.0) -> None:
+        """
+        Flush buffered messages within timeout; no-op if producer not initialized.
+        """
         if self._producer:
             self._producer.flush(timeout)

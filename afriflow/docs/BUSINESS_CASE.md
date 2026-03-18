@@ -1,3 +1,9 @@
+<!--
+@file BUSINESS_CASE.md
+@description Business case narrative and quantified opportunity for AfriFlow cross-domain integration
+@author Thabo Kunene
+@created 2026-03-17
+-->
 <!-- docs/BUSINESS_CASE.md -->
 
 # AfriFlow Business Case

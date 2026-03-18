@@ -1,3 +1,13 @@
+# =============================================================================
+# @file schema.yml
+# @description CIB domain dbt schema definitions, tests, and column metadata
+#     for all CIB domain models including staging, intermediate, and mart tables.
+#     Defines data quality tests, documentation, and business logic validation
+#     for corporate and investment banking data pipelines.
+# @author Thabo Kunene
+# @created 2026-03-18
+# =============================================================================
+
 version: 2
 
 #

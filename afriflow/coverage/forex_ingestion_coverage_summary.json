@@ -1,0 +1,35 @@
+{
+  "include_subpath": "forex/ingestion",
+  "rows": [
+    {
+      "module": "forex/ingestion/__init__.py",
+      "line_pct": 100.0,
+      "branch_pct": 100.0,
+      "func_pct": 100.0,
+      "lines_valid": 0,
+      "lines_covered": 0,
+      "branches_valid": 0,
+      "branches_covered": 0,
+      "func_total": 0,
+      "func_covered": 0,
+      "line_str": "100.0%",
+      "branch_str": "100.0%",
+      "func_str": "100.0% (0/0)"
+    },
+    {
+      "module": "forex/ingestion/kafka_producer.py",
+      "line_pct": 86.26,
+      "branch_pct": 71.88,
+      "func_pct": 100.0,
+      "lines_valid": 0,
+      "lines_covered": 0,
+      "branches_valid": 0,
+      "branches_covered": 0,
+      "func_total": 10,
+      "func_covered": 10,
+      "line_str": "86.3%",
+      "branch_str": "71.9%",
+      "func_str": "100.0% (10/10)"
+    }
+  ]
+}

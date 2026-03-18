@@ -1,4 +1,10 @@
-﻿# 05 Cross Domain Signals
+﻿<!--
+@file 05_CROSS_DOMAIN_SIGNALS.md
+@description Catalog of cross-domain signals for expansion, attrition, and risk management
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 05 Cross Domain Signals
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

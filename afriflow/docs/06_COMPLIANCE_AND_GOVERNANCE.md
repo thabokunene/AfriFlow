@@ -1,4 +1,10 @@
-﻿# 06 Compliance and Governance
+<!--
+@file 06_COMPLIANCE_AND_GOVERNANCE.md
+@description Compliance and governance policies, controls, and operational guardrails
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 06 Compliance and Governance
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

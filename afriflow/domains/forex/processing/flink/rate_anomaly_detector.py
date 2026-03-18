@@ -1,4 +1,11 @@
 """
+@file rate_anomaly_detector.py
+@description Detects FX rate anomalies using Z-score; RBAC and structured logging included
+@author Thabo Kunene
+@created 2026-03-17
+"""
+
+"""
 Rate Anomaly Detector (Forex, Flink-style).
 
 We detect anomalous FX rate movements that may indicate:

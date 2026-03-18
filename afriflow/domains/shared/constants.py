@@ -1,4 +1,11 @@
 """
+@file constants.py
+@description Shared constants for date formats, Kafka topics, thresholds, and platform defaults
+@author Thabo Kunene
+@created 2026-03-17
+"""
+
+"""
 AfriFlow Domain Constants.
 
 We define shared constants used across all domains
@@ -10,7 +17,7 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
-import os
+import os  # Environment variable reads for default connection endpoints and compatibility
 from typing import Final
 
 # =============================================================================

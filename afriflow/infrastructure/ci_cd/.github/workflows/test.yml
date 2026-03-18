@@ -1,31 +1,84 @@
+# =============================================================================
+# @file test.yml
+# @description GitHub Actions workflow that validates AfriFlow infrastructure
+#              definitions on every push to main/develop and on pull requests
+#              targeting main. Two parallel jobs run independently:
+#                terraform-validate   — checks Terraform syntax and provider
+#                                       compatibility without touching remote state
+#                docker-compose-check — dry-runs Docker Compose config resolution
+#                                       to catch missing variables or invalid references
+#              Path filters prevent the workflow from running on unrelated changes.
+# @author Thabo Kunene
+# @created 2026-03-17
+# =============================================================================
+
 name: Test Infrastructure
 
+# ---------------------------------------------------------------------------
+# TRIGGER CONDITIONS
+# Run only when infrastructure files are modified to avoid wasting CI minutes
+# on commits that touch only application code or documentation.
+# ---------------------------------------------------------------------------
 on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'afriflow/infrastructure/**'
+      - 'afriflow/infrastructure/**'    # Any infrastructure change triggers validation
   pull_request:
     branches: [ main ]
     paths:
       - 'afriflow/infrastructure/**'
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # JOB: terraform-validate
+  # Initialises Terraform without a remote backend (-backend=false) so no
+  # credentials are needed, then runs `terraform validate` to confirm that
+  # all HCL syntax is correct and all required provider plugins are satisfied.
+  # This catches typos, missing variables, and misconfigured resources before
+  # any code reaches a real cloud environment.
+  # ---------------------------------------------------------------------------
   terraform-validate:
     runs-on: ubuntu-latest
+
     steps:
+      # 1. Check out the repo so Terraform files are available on the runner
       - uses: actions/checkout@v3
+
+      # 2. Install Terraform CLI using the official HashiCorp setup action
       - uses: hashicorp/setup-terraform@v2
+
+      # 3. Initialise Terraform with -backend=false to skip remote state
+      #    configuration. This downloads provider plugins from the registry
+      #    but does not attempt to connect to any cloud backend.
       - name: Terraform Init
         run: terraform -chdir=afriflow/infrastructure/terraform init -backend=false
+
+      # 4. Validate the Terraform configuration.
+      #    Checks HCL syntax, variable references, and resource argument names.
+      #    Does NOT make any API calls to cloud providers.
       - name: Terraform Validate
         run: terraform -chdir=afriflow/infrastructure/terraform validate
 
+  # ---------------------------------------------------------------------------
+  # JOB: docker-compose-check
+  # Runs `docker-compose config -q` (quiet mode) against the full Compose file.
+  # This resolves all YAML anchors, variable substitutions, and image references,
+  # and exits non-zero if any configuration error is detected. Catches issues
+  # like undefined environment variables, syntax errors, and invalid volume
+  # definitions before developers attempt to spin up the stack locally.
+  # ---------------------------------------------------------------------------
   docker-compose-check:
     runs-on: ubuntu-latest
+
     steps:
+      # 1. Check out the repo so docker-compose.yml and .env are available
       - uses: actions/checkout@v3
+
+      # 2. Change into the infrastructure directory (where docker-compose.yml lives)
+      #    and run the config check. The -q flag suppresses normal output so only
+      #    errors are printed, keeping the CI log clean on success.
       - name: Docker Compose Config
         run: |
           cd afriflow/infrastructure
-          docker-compose config -q
+          docker-compose config -q    # Validate full config resolution; fail on any error

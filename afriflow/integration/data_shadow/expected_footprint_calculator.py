@@ -1,4 +1,14 @@
 """
+@file expected_footprint_calculator.py
+@description Expected Footprint Calculator for the AfriFlow Data Shadow model.
+             For each client, derives the data footprint that should be observed
+             across all five domains, based on CIB corridor values as the primary
+             signal. Compares expected vs actual presence and labels gaps as
+             COMPETITOR_LEAKAGE or UNEXPECTED_PRESENCE. Feeds the shadow scoring
+             pipeline that routes high-severity gaps to RM alert queues.
+@author Thabo Kunene
+@created 2026-03-18
+
 Data Shadow Model: Expected Footprint Calculator.
 
 For each client, we calculate the data footprint we
@@ -16,8 +26,8 @@ built it as a demonstration of concept, domain
 knowledge, and skill.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field  # clean value objects for footprint data
+from typing import Dict, List, Optional  # type annotations for all public interfaces
 
 
 @dataclass
@@ -50,22 +60,27 @@ class ExpectedFootprint:
 
 class ExpectedFootprintCalculator:
     """
-    We calculate what data we expect to see for each
-    client across all domains and all countries.
+    We calculate what data we expect to see for each client
+    across all domains and all countries.
 
-    We derive expectations from confirmed data. For
-    example, if CIB data shows R500M in payments to
-    Nigeria, we expect to see forex hedging for NGN,
-    insurance coverage in Nigeria, cell SIM
-    activations in Nigeria, and PBB payroll accounts
+    We derive expectations from confirmed data. For example,
+    if CIB data shows R500M in payments to Nigeria, we expect
+    to see forex hedging for NGN, insurance coverage in Nigeria,
+    cell SIM activations in Nigeria, and PBB payroll accounts
     for Nigerian employees.
     """
 
-    # We define minimum CIB corridor value (ZAR) that
-    # triggers expectation of other domain presence.
+    # Minimum CIB corridor value (ZAR) that triggers expectation of other domain presence.
+    # Thresholds are calibrated so that only meaningful business relationships
+    # generate expectations — very small corridors do not imply full-service needs.
+    #
+    # Forex: low threshold because any material cross-border payment should be hedged
     MIN_CIB_VALUE_FOR_FOREX_EXPECTATION = 5_000_000
+    # Insurance: higher threshold — only operations with physical assets need coverage
     MIN_CIB_VALUE_FOR_INSURANCE_EXPECTATION = 10_000_000
+    # Cell: even higher — implies a permanent office or workforce in the country
     MIN_CIB_VALUE_FOR_CELL_EXPECTATION = 20_000_000
+    # PBB: highest threshold — implies a significant local workforce receiving salaries
     MIN_CIB_VALUE_FOR_PBB_EXPECTATION = 50_000_000
 
     def calculate(
@@ -79,11 +94,23 @@ class ExpectedFootprintCalculator:
         pbb_countries: List[str],
     ) -> ExpectedFootprint:
         """
-        Calculate the expected data footprint for a
-        client and compare it to actual presence.
+        Calculate the expected data footprint for a client and compare it
+        to the actual observed presence.
 
-        We return an ExpectedFootprint object with
-        gaps identified.
+        We scan every country where any domain has confirmed activity,
+        then for each country we assess whether each domain should be
+        present (based on CIB corridor value thresholds) and whether it
+        actually is. Gaps are labelled COMPETITOR_LEAKAGE (expected but
+        absent) or UNEXPECTED_PRESENCE (present but not expected).
+
+        :param golden_id: Unified client identifier
+        :param client_name: Canonical client name
+        :param cib_corridors: Dict of country → ZAR corridor value from CIB
+        :param forex_currencies: Dict of currency code → notional (e.g. {'NGN': 5e6})
+        :param insurance_countries: List of countries with active insurance policies
+        :param cell_countries: List of countries with confirmed SIM/MoMo presence
+        :param pbb_countries: List of countries with PBB payroll accounts
+        :return: ExpectedFootprint with expected, actual, and gap fields populated
         """
 
         footprint = ExpectedFootprint(
@@ -91,8 +118,8 @@ class ExpectedFootprintCalculator:
             client_name=client_name,
         )
 
-        # We gather all countries where we see any
-        # activity.
+        # Union of all countries where ANY domain shows activity.
+        # This is the set of countries we evaluate.
         all_countries = set()
         all_countries.update(cib_corridors.keys())
         all_countries.update(

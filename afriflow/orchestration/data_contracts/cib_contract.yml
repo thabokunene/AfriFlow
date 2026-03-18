@@ -1,3 +1,7 @@
+# @file cib_contract.yml
+# @description Data contract for CIB (Corporate Investment Banking) domain integration
+# @author Thabo Kunene
+# @created 2026-03-17
 # orchestration/data_contracts/cib_contract.yml
 #
 # Data contract for the CIB (Corporate Investment
@@ -7,12 +11,8 @@
 # SLA, and ownership for data produced by the CIB
 # domain and consumed by the integration layer.
 #
-# Disclaimer:
-#   This project is not sanctioned by, affiliated with,
-#   or endorsed by Standard Bank Group, MTN Group, or
-#   any affiliated entity. It is a demonstration of
-#   concept, domain knowledge, and data engineering
-#   skill by Thabo Kunene.
+# DISCLAIMER: This project is not sanctioned by, affiliated with, or
+# endorsed by Standard Bank Group, MTN Group, or any of their subsidiaries.
 
 contract:
   name: "CIB Payments Data Contract"

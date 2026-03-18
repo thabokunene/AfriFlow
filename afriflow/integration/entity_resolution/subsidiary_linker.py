@@ -1,33 +1,28 @@
 """
-integration/entity_resolution/subsidiary_linker.py
-
-Corporate subsidiary linkage and Ultimate Beneficial Owner (UBO) resolution.
-
-We trace ownership chains across cross-border corporate structures common
-in African CIB portfolios — Mauritius holding companies, South African
-OpCos, and Nigerian/Ghanaian branches nested under European ultimate
-parents.  Circular ownership (common in Southern African holding structures)
-is detected and flagged rather than causing infinite loops.
-
-This is critical for:
-  - Know Your Customer (KYC) / AML group-level exposure aggregation.
-  - Relationship Manager briefings that surface cross-subsidiary signals.
-  - CIB pricing: aggregate fee relationships across a group.
-
-DISCLAIMER: This project is not a sanctioned initiative of Standard Bank
-Group, MTN, or any affiliated entity. It is a demonstration of concept,
-domain knowledge, and data engineering skill by Thabo Kunene.
+@file subsidiary_linker.py
+@description Corporate Subsidiary Linker and UBO Resolver for the AfriFlow entity
+             resolution layer. Traces ownership chains across cross-border corporate
+             structures common in African CIB portfolios — Mauritius holding companies,
+             South African OpCos, and Nigerian/Ghanaian branches nested under European
+             ultimate parents. Circular ownership (common in Southern African holding
+             structures) is detected and flagged rather than causing infinite loops.
+             Used for KYC/AML group-level exposure aggregation, RM briefings, and
+             CIB pricing across the full corporate group.
+@author Thabo Kunene
+@created 2026-03-18
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Set
-from enum import Enum
+from dataclasses import dataclass, field  # structured entity, link, and result value objects
+from datetime import datetime              # ISO timestamps for registration and effective dates
+from typing import Any, Dict, List, Optional, Set  # full type annotations
+from enum import Enum                      # typed link type and entity category enumerations
 
-from afriflow.exceptions import ConfigurationError
-from afriflow.logging_config import get_logger, log_operation
-from afriflow.governance.cross_border_data_rules import DataResidencyTier
+# AfriFlow internal imports
+from afriflow.exceptions import ConfigurationError  # raised for invalid registrations and links
+from afriflow.logging_config import get_logger, log_operation  # structured operation logging
+from afriflow.governance.cross_border_data_rules import DataResidencyTier  # governance tier
 
+# Module-level logger
 logger = get_logger("entity_resolution.subsidiary_linker")
 
 
@@ -37,21 +32,21 @@ logger = get_logger("entity_resolution.subsidiary_linker")
 
 class LinkType(Enum):
     """Nature of the ownership relationship between two entities."""
-    DIRECT = "direct"           # Entity A owns Entity B directly
-    INDIRECT = "indirect"       # Entity A controls Entity B via intermediary
-    BENEFICIAL = "beneficial"   # Beneficial interest only (e.g. trust beneficiary)
-    NOMINEE = "nominee"         # Registered owner acting on behalf of another
+    DIRECT     = "direct"      # Entity A owns Entity B directly (direct shareholding)
+    INDIRECT   = "indirect"    # Entity A controls Entity B via an intermediary
+    BENEFICIAL = "beneficial"  # Beneficial interest only (e.g. trust beneficiary)
+    NOMINEE    = "nominee"     # Registered owner acting on behalf of the true owner
 
 
 class EntityCategory(Enum):
-    """High-level category of a registered entity."""
-    HOLDING = "holding"
-    OPERATING = "operating"
-    BRANCH = "branch"
-    TRUST = "trust"
-    INDIVIDUAL = "individual"
-    FUND = "fund"
-    SPECIAL_PURPOSE = "special_purpose"
+    """High-level category of a registered legal entity."""
+    HOLDING        = "holding"         # holding company with no operating activities
+    OPERATING      = "operating"       # operational entity with revenue
+    BRANCH         = "branch"          # foreign branch of a legal entity
+    TRUST          = "trust"           # trust structure
+    INDIVIDUAL     = "individual"      # natural person (UBO or director)
+    FUND           = "fund"            # investment fund or collective scheme
+    SPECIAL_PURPOSE = "special_purpose"  # SPV / SPE for structured finance
 
 
 # ---------------------------------------------------------------------------
@@ -67,47 +62,46 @@ class RegisteredEntity:
         entity_id:       Unique identifier (may be a golden ID).
         name:            Legal name of the entity.
         country:         ISO 3166-1 alpha-2 country of registration.
-        entity_type:     EntityCategory value.
+        entity_type:     EntityCategory value string.
         residency_tier:  Data residency tier from governance rules.
-        registered_at:   ISO timestamp of when the entity was registered here.
+        registered_at:   ISO timestamp of when the entity was added to the registry.
         metadata:        Arbitrary additional attributes.
     """
 
-    entity_id: str
-    name: str
-    country: str
-    entity_type: str
-    residency_tier: DataResidencyTier = DataResidencyTier.UNREGULATED
+    entity_id: str                                        # unique entity identifier
+    name: str                                             # legal name
+    country: str                                          # ISO 3166-1 alpha-2 country code
+    entity_type: str                                      # EntityCategory value string
+    residency_tier: DataResidencyTier = DataResidencyTier.UNREGULATED  # governance tier
     registered_at: str = field(
-        default_factory=lambda: datetime.utcnow().isoformat() + "Z"
+        default_factory=lambda: datetime.utcnow().isoformat() + "Z"  # UTC ISO timestamp
     )
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)  # arbitrary key-value attributes
 
 
 @dataclass
 class OwnershipLink:
     """
-    We represent a single directed ownership link from a child entity
-    to its parent.
+    We represent a single directed ownership link from a child entity to its parent.
 
     Attributes:
         entity_id:      The owned (child) entity.
         parent_id:      The owning (parent) entity.
         ownership_pct:  Percentage of the child held by the parent (0–100).
         country:        Country where the ownership instrument is registered.
-        link_type:      Nature of the link (direct / indirect / beneficial).
-        confidence:     Confidence in this link, 0–1 (1 = verified from registry).
+        link_type:      Nature of the link (DIRECT / INDIRECT / BENEFICIAL / NOMINEE).
+        confidence:     Confidence in this link (1.0 = verified from registry).
         effective_date: ISO date from which this link applies.
     """
 
-    entity_id: str
-    parent_id: str
-    ownership_pct: float
-    country: str
-    link_type: str = LinkType.DIRECT.value
-    confidence: float = 1.0
+    entity_id: str               # child entity (the one being owned)
+    parent_id: str               # parent entity (the owner)
+    ownership_pct: float         # percentage held by parent (0–100]
+    country: str                 # country of the ownership instrument
+    link_type: str = LinkType.DIRECT.value  # nature of ownership
+    confidence: float = 1.0      # 1.0 = verified; < 1.0 = estimated or inferred
     effective_date: str = field(
-        default_factory=lambda: datetime.utcnow().date().isoformat()
+        default_factory=lambda: datetime.utcnow().date().isoformat()  # today's date
     )
 
 
@@ -121,18 +115,18 @@ class UBOResult:
         ultimate_owner_id:   Entity ID of the UBO (deepest non-owned entity).
         chain:               Ordered list of entity IDs from start → UBO.
         total_ownership_pct: Product of ownership percentages along the chain.
-        countries_in_chain:  Distinct countries present in the chain.
+        countries_in_chain:  Distinct countries present in the chain (ordered).
         is_circular:         True if a circular ownership loop was detected.
         depth:               Number of hops from entity to UBO.
     """
 
-    entity_id: str
-    ultimate_owner_id: str
-    chain: List[str] = field(default_factory=list)
-    total_ownership_pct: float = 100.0
-    countries_in_chain: List[str] = field(default_factory=list)
-    is_circular: bool = False
-    depth: int = 0
+    entity_id: str                                       # starting entity
+    ultimate_owner_id: str                               # UBO — topmost entity with no parent
+    chain: List[str] = field(default_factory=list)       # ordered chain from start → UBO
+    total_ownership_pct: float = 100.0                   # product of ownership percentages
+    countries_in_chain: List[str] = field(default_factory=list)  # countries traversed
+    is_circular: bool = False                            # True if circular ownership detected
+    depth: int = 0                                       # chain length (hops to UBO)
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +140,7 @@ class SubsidiaryLinker:
     arbitrary depth.
 
     Circular ownership structures are detected and flagged; the traversal
-    terminates at the first repeated node.
+    terminates at the first repeated node rather than looping infinitely.
 
     Usage::
 
@@ -159,10 +153,10 @@ class SubsidiaryLinker:
     """
 
     def __init__(self) -> None:
-        """Initialise the linker with empty registries."""
+        """Initialise the linker with empty entity and ownership link registries."""
         # entity_id → RegisteredEntity
         self._entities: Dict[str, RegisteredEntity] = {}
-        # entity_id → list of OwnershipLink (links pointing to parents)
+        # entity_id → list of OwnershipLink (links pointing upward to parents)
         self._ownership_links: Dict[str, List[OwnershipLink]] = {}
         logger.info("SubsidiaryLinker initialised")
 
@@ -182,26 +176,24 @@ class SubsidiaryLinker:
         """
         We register a new legal entity in the linker's internal registry.
 
-        Args:
-            entity_id:      Unique identifier for this entity.
-            name:           Legal name.
-            country:        ISO 3166-1 alpha-2 country code.
-            entity_type:    EntityCategory value string.
-            residency_tier: DataResidencyTier from governance rules.
-            metadata:       Optional key-value metadata.
-
-        Returns:
-            The created RegisteredEntity.
-
-        Raises:
-            ConfigurationError: If entity_id is already registered or
-                                 entity_type is not a valid EntityCategory.
+        :param entity_id:      Unique identifier for this entity.
+        :param name:           Legal name.
+        :param country:        ISO 3166-1 alpha-2 country code.
+        :param entity_type:    EntityCategory value string.
+        :param residency_tier: DataResidencyTier from governance rules.
+        :param metadata:       Optional key-value metadata.
+        :return: The created RegisteredEntity.
+        :raises ConfigurationError: If entity_id is already registered or
+                                     entity_type is not a valid EntityCategory.
         """
+        # Prevent duplicate registrations — each entity_id must be unique
         if entity_id in self._entities:
             raise ConfigurationError(
                 f"Entity '{entity_id}' is already registered.",
                 details={"entity_id": entity_id},
             )
+
+        # Validate entity type against the EntityCategory enum
         valid_types = {e.value for e in EntityCategory}
         if entity_type not in valid_types:
             raise ConfigurationError(
@@ -212,12 +204,13 @@ class SubsidiaryLinker:
         entity = RegisteredEntity(
             entity_id=entity_id,
             name=name,
-            country=country.upper(),
+            country=country.upper(),  # normalise ISO code to uppercase
             entity_type=entity_type,
             residency_tier=residency_tier,
             metadata=metadata or {},
         )
         self._entities[entity_id] = entity
+        # Pre-initialise the ownership links list to avoid KeyError on first add
         self._ownership_links.setdefault(entity_id, [])
         logger.info(f"Registered entity: {entity_id} ({name}, {country})")
         return entity
@@ -234,21 +227,18 @@ class SubsidiaryLinker:
         """
         We add a directional ownership link from a child entity to a parent.
 
-        Args:
-            child_id:      The entity being owned.
-            parent_id:     The owning entity.
-            ownership_pct: Percentage held (0.0–100.0).
-            country:       Country of the ownership instrument.
-            link_type:     LinkType value string.
-            confidence:    Confidence level (0–1).
-
-        Returns:
-            The created OwnershipLink.
-
-        Raises:
-            ConfigurationError: If either entity is not registered, ownership_pct
-                                 is out of range, or link_type is invalid.
+        :param child_id:       The entity being owned.
+        :param parent_id:      The owning entity.
+        :param ownership_pct:  Percentage held (must be in (0.0, 100.0]).
+        :param country:        Country of the ownership instrument.
+        :param link_type:      LinkType value string.
+        :param confidence:     Confidence level (0–1; 1.0 = registry-verified).
+        :return: The created OwnershipLink.
+        :raises ConfigurationError: If either entity is not registered,
+                                     ownership_pct is out of range, or
+                                     link_type is invalid.
         """
+        # Both entities must be registered before a link between them can be created
         if child_id not in self._entities:
             raise ConfigurationError(
                 f"Child entity '{child_id}' is not registered. "
@@ -261,11 +251,15 @@ class SubsidiaryLinker:
                 "Call register_entity first.",
                 details={"parent_id": parent_id},
             )
+
+        # Ownership of 0% is not a meaningful link; > 100% is invalid
         if not (0.0 < ownership_pct <= 100.0):
             raise ConfigurationError(
                 f"ownership_pct must be in (0, 100], got {ownership_pct}",
                 details={"ownership_pct": ownership_pct},
             )
+
+        # Validate link type
         valid_types = {e.value for e in LinkType}
         if link_type not in valid_types:
             raise ConfigurationError(
@@ -277,7 +271,7 @@ class SubsidiaryLinker:
             entity_id=child_id,
             parent_id=parent_id,
             ownership_pct=ownership_pct,
-            country=country.upper(),
+            country=country.upper(),  # normalise country code
             link_type=link_type,
             confidence=confidence,
         )
@@ -298,23 +292,17 @@ class SubsidiaryLinker:
         max_depth: int = 10,
     ) -> UBOResult:
         """
-        We traverse the ownership chain upward to find the Ultimate
-        Beneficial Owner — the topmost entity with no registered parent.
+        We traverse the ownership chain upward to find the Ultimate Beneficial Owner —
+        the topmost entity with no registered parent.
 
-        When multiple parents exist (common in partial ownership or
-        consortium structures) we follow the parent with the highest
-        ownership percentage.
+        When multiple parents exist (partial ownership or consortium structures) we
+        follow the parent with the highest ownership percentage.
 
-        Args:
-            entity_id:  Starting entity.
-            max_depth:  Maximum chain length before stopping (prevents runaway
-                        traversal in very deep structures).
-
-        Returns:
-            UBOResult with the resolved chain and metadata.
-
-        Raises:
-            ConfigurationError: If entity_id is not registered.
+        :param entity_id:  Starting entity.
+        :param max_depth:  Maximum chain length before stopping.
+                           Prevents runaway traversal in very deep structures.
+        :return: UBOResult with the resolved chain and metadata.
+        :raises ConfigurationError: If entity_id is not registered.
         """
         if entity_id not in self._entities:
             raise ConfigurationError(
@@ -324,24 +312,25 @@ class SubsidiaryLinker:
 
         log_operation(logger, "find_ubo", "started", entity_id=entity_id)
 
-        chain: List[str] = [entity_id]
-        visited: Set[str] = {entity_id}
+        chain: List[str] = [entity_id]  # growing chain from start entity to UBO
+        visited: Set[str] = {entity_id}  # prevents re-visiting nodes (circular detection)
         current_id = entity_id
-        running_pct: float = 100.0
+        running_pct: float = 100.0  # product of ownership percentages along the chain
         is_circular = False
+        # Collect countries in chain for cross-border structure analysis
         countries: List[str] = [self._entities[entity_id].country]
 
         for _ in range(max_depth):
             parents = self._ownership_links.get(current_id, [])
             if not parents:
-                # No parent → current_id is the UBO
-                break
+                break  # no parent → current_id is the UBO
 
-            # Choose parent with the highest ownership percentage
+            # Select the dominant parent (highest ownership percentage)
             dominant = max(parents, key=lambda lnk: lnk.ownership_pct)
             next_id = dominant.parent_id
 
             if next_id in visited:
+                # Circular ownership detected — flag and stop traversal
                 is_circular = True
                 logger.warning(
                     f"Circular ownership detected at {next_id} "
@@ -349,13 +338,14 @@ class SubsidiaryLinker:
                 )
                 break
 
+            # Accumulate the ownership percentage product along the chain
             running_pct *= dominant.ownership_pct / 100.0
             visited.add(next_id)
             chain.append(next_id)
             countries.append(self._entities[next_id].country)
             current_id = next_id
 
-        ubo_id = chain[-1]
+        ubo_id = chain[-1]  # last entity in the chain is the UBO
         result = UBOResult(
             entity_id=entity_id,
             ultimate_owner_id=ubo_id,
@@ -363,7 +353,7 @@ class SubsidiaryLinker:
             total_ownership_pct=round(running_pct, 6),
             countries_in_chain=list(dict.fromkeys(countries)),  # deduplicated, ordered
             is_circular=is_circular,
-            depth=len(chain) - 1,
+            depth=len(chain) - 1,  # number of hops from start to UBO
         )
         log_operation(
             logger, "find_ubo", "completed",
@@ -384,15 +374,10 @@ class SubsidiaryLinker:
         We return all entity IDs that are subsidiaries of parent_id,
         up to max_depth levels below.
 
-        Args:
-            parent_id:  Root parent entity.
-            max_depth:  Maximum depth to descend.
-
-        Returns:
-            Flat list of subsidiary entity IDs (not including parent_id).
-
-        Raises:
-            ConfigurationError: If parent_id is not registered.
+        :param parent_id:  Root parent entity.
+        :param max_depth:  Maximum depth to descend (default 5).
+        :return: Flat list of subsidiary entity IDs (not including parent_id).
+        :raises ConfigurationError: If parent_id is not registered.
         """
         if parent_id not in self._entities:
             raise ConfigurationError(
@@ -401,19 +386,20 @@ class SubsidiaryLinker:
             )
 
         # Build a reverse index: parent_id → [child_id, ...]
+        # We rebuild this each call because it's simpler than maintaining a live index
         reverse: Dict[str, List[str]] = {}
         for eid, links in self._ownership_links.items():
             for lnk in links:
                 reverse.setdefault(lnk.parent_id, []).append(eid)
 
         result: List[str] = []
-        queue: List[tuple] = [(parent_id, 0)]
+        queue: List[tuple] = [(parent_id, 0)]  # (entity_id, current_depth)
         visited: Set[str] = {parent_id}
 
         while queue:
             current, depth = queue.pop(0)
             if depth >= max_depth:
-                continue
+                continue  # do not descend beyond max_depth
             for child_id in reverse.get(current, []):
                 if child_id not in visited:
                     visited.add(child_id)
@@ -430,15 +416,10 @@ class SubsidiaryLinker:
         """
         We find all cycles that pass through entity_id in the ownership graph.
 
-        Args:
-            entity_id: Entity to check for circular ownership.
-
-        Returns:
-            List of cycles, each cycle is a list of entity IDs forming the loop.
-            Returns an empty list if no cycles are found.
-
-        Raises:
-            ConfigurationError: If entity_id is not registered.
+        :param entity_id: Entity to check for circular ownership.
+        :return: List of cycles, each cycle is a list of entity IDs forming the loop.
+                 Returns an empty list if no cycles are found.
+        :raises ConfigurationError: If entity_id is not registered.
         """
         if entity_id not in self._entities:
             raise ConfigurationError(
@@ -457,18 +438,27 @@ class SubsidiaryLinker:
         path_set: Set[str],
         cycles: List[List[str]],
     ) -> None:
-        """We perform a DFS to find all cycles through the current node."""
+        """
+        We perform a depth-first search to find all cycles through the current node.
+
+        :param current: Current entity being visited.
+        :param path: Path from the starting entity to current.
+        :param path_set: Set representation of path for O(1) membership tests.
+        :param cycles: Accumulator list for detected cycles.
+        """
         path_set.add(current)
         path.append(current)
 
         for link in self._ownership_links.get(current, []):
             next_id = link.parent_id
             if next_id == path[0]:
-                # Full cycle back to the starting node
+                # Full cycle back to the starting node — record it
                 cycles.append(path[:] + [next_id])
             elif next_id not in path_set and next_id in self._entities:
+                # Continue DFS
                 self._dfs_cycles(next_id, path, path_set, cycles)
 
+        # Backtrack: remove current from path before returning
         path.pop()
         path_set.discard(current)
 
@@ -479,16 +469,12 @@ class SubsidiaryLinker:
     def get_group_structure(self, root_id: str) -> Dict[str, Any]:
         """
         We return a nested dictionary describing the full group structure
-        beneath root_id.
+        beneath root_id, sorted by ownership percentage descending.
 
-        Args:
-            root_id: Top-level entity of the group.
-
-        Returns:
-            Dictionary with keys:
-                - entity:       RegisteredEntity dict
-                - subsidiaries: List of recursive get_group_structure results
-                - direct_links: Summary of immediate ownership links
+        :param root_id: Top-level entity of the group.
+        :return: Nested dict with keys: entity_id, name, country, entity_type,
+                 residency_tier, subsidiaries (recursive list).
+        :raises ConfigurationError: If root_id is not registered.
         """
         if root_id not in self._entities:
             raise ConfigurationError(
@@ -496,18 +482,18 @@ class SubsidiaryLinker:
                 details={"root_id": root_id},
             )
 
-        entity = self._entities[root_id]
-
-        # Reverse index for children
+        # Build a reverse index: parent_id → [OwnershipLink, ...]
         reverse: Dict[str, List[OwnershipLink]] = {}
         for eid, links in self._ownership_links.items():
             for lnk in links:
                 reverse.setdefault(lnk.parent_id, []).append(lnk)
 
         def _build(eid: str, visited: Set[str]) -> Dict[str, Any]:
+            """Recursively build the nested group structure dict."""
             ent = self._entities[eid]
             children = reverse.get(eid, [])
             subs = []
+            # Sort by ownership percentage descending for consistent output
             for lnk in sorted(children, key=lambda x: x.ownership_pct, reverse=True):
                 if lnk.entity_id not in visited:
                     visited.add(lnk.entity_id)
@@ -522,14 +508,19 @@ class SubsidiaryLinker:
                 "name": ent.name,
                 "country": ent.country,
                 "entity_type": ent.entity_type,
-                "residency_tier": ent.residency_tier.name,
+                "residency_tier": ent.residency_tier.name,  # enum name not value
                 "subsidiaries": subs,
             }
 
         return _build(root_id, {root_id})
 
     def get_statistics(self) -> Dict[str, Any]:
-        """We return summary statistics for the current registry."""
+        """
+        We return summary statistics for the current registry.
+
+        :return: Dict with total_entities, total_ownership_links,
+                 countries_represented, and entity_types breakdown.
+        """
         total_links = sum(len(v) for v in self._ownership_links.values())
         countries = {e.country for e in self._entities.values()}
         return {
@@ -537,6 +528,7 @@ class SubsidiaryLinker:
             "total_ownership_links": total_links,
             "countries_represented": sorted(countries),
             "entity_types": {
+                # Count entities per category type
                 etype: sum(
                     1 for e in self._entities.values()
                     if e.entity_type == etype
@@ -553,7 +545,7 @@ class SubsidiaryLinker:
 if __name__ == "__main__":
     linker = SubsidiaryLinker()
 
-    # Register a simple Mauritius → SA → Nigeria group structure
+    # Register a Mauritius → SA → Nigeria/Kenya group structure
     linker.register_entity(
         "MU-HOLD-001", "Africa Growth Holdings Ltd", "MU", "holding",
         residency_tier=DataResidencyTier.MODERATE,

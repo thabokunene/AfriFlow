@@ -1,3 +1,9 @@
+/*
+ * @file stg_cell_usage.sql
+ * @description dbt staging model for cell usage data with cleaning and validation
+ * @author Thabo Kunene
+ * @created 2026-03-17
+ */
 {{
     config(
         materialized='view',

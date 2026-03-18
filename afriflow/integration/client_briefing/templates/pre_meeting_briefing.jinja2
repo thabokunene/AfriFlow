@@ -1,0 +1,94 @@
+{#
+  @file pre_meeting_briefing.jinja2
+  @description Renders a full pre-meeting client intelligence briefing for
+               the relationship manager. This template is the primary RM-facing
+               output of the AfriFlow briefing engine. It combines the golden
+               record relationship snapshot, cross-domain change events,
+               ranked revenue opportunities, risk alerts, and prepared talking
+               points into a structured document.
+
+               Expected context variables:
+                 briefing  — ClientBriefing dataclass instance from briefing_generator.py
+  @author Thabo Kunene
+  @created 2026-03-18
+#}
+
+{# ============================================================ #}
+{# SECTION: Header separator and client identification          #}
+{# ============================================================ #}
+{{ "=" * 60 }}
+CLIENT BRIEFING: {{ briefing.client_name }}
+Meeting: {{ briefing.meeting_datetime }}
+{{ "=" * 60 }}
+
+{# ============================================================ #}
+{# SECTION: Relationship snapshot                               #}
+{# Shows aggregate ZAR value, health status, tier, and which   #}
+{# domains are active for this client.                         #}
+{# ============================================================ #}
+RELATIONSHIP SNAPSHOT
+  Total Value: R{{ "{:,.0f}".format(briefing.total_relationship_value_zar) }}
+  Health: {{ briefing.health_status }}
+  Tier: {{ briefing.client_tier }}
+  Domains Active:
+  {%- for domain, active in briefing.domains_active.items() %}
+    {{ domain | upper }}: {{ "Y" if active else "N" }}
+  {%- endfor %}
+
+{# ============================================================ #}
+{# SECTION: Changes since last meeting                         #}
+{# Iterates over ChangeEvent objects.  If none exist, renders  #}
+{# a placeholder so the section is never visually empty.       #}
+{# ============================================================ #}
+WHAT CHANGED SINCE LAST MEETING ({{ briefing.last_meeting_date or "Unknown" }})
+{% if briefing.changes_since_last_meeting %}
+  {%- for change in briefing.changes_since_last_meeting %}
+  [{{ change.domain | upper }}] {{ change.description }}
+  {%- endfor %}
+{% else %}
+  No significant changes detected.
+{% endif %}
+
+{# ============================================================ #}
+{# SECTION: Top revenue opportunities                          #}
+{# Opportunities are pre-sorted by estimated_value_zar desc.   #}
+{# Cap at 5 is enforced by the generator, not the template.    #}
+{# ============================================================ #}
+TOP OPPORTUNITIES
+{% for opp in briefing.top_opportunities %}
+  {{ opp.rank }}. {{ opp.description }}
+     Estimated value: R{{ "{:,.0f}".format(opp.estimated_value_zar) }}
+     Source: {{ opp.source_signal }}
+
+{% endfor %}
+
+{# ============================================================ #}
+{# SECTION: Risk alerts                                        #}
+{# Each alert shows severity, domain, description, and the     #}
+{# suggested discussion point the RM can raise in the meeting. #}
+{# ============================================================ #}
+RISK ALERTS
+{% if briefing.risk_alerts %}
+  {%- for risk in briefing.risk_alerts %}
+  [{{ risk.severity }}] [{{ risk.domain | upper }}] {{ risk.description }}
+  Discuss: {{ risk.recommended_discussion_point }}
+
+  {%- endfor %}
+{% else %}
+  No active risk alerts.
+{% endif %}
+
+{# ============================================================ #}
+{# SECTION: Suggested talking points                           #}
+{# Pre-composed natural-language conversation starters.        #}
+{# Cap at 5 is enforced by the generator.                      #}
+{# ============================================================ #}
+SUGGESTED TALKING POINTS
+{% for point in briefing.talking_points %}
+  {{ loop.index }}. {{ point }}
+{% endfor %}
+
+{{ "=" * 60 }}
+Generated: {{ briefing.generated_at }}
+Prepared for: {{ briefing.relationship_manager }}
+{{ "=" * 60 }}

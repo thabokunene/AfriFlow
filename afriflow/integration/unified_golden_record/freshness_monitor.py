@@ -1,26 +1,24 @@
 """
-Unified Golden Record - Freshness Monitor
-
-We monitor the freshness of each domain's contribution
-to the unified golden record. A golden record is only as
-current as its stalest domain input.
-
-Domain SLAs (maximum acceptable latency):
-  CIB payments:   4 hours  (high-value, time-sensitive)
-  Forex positions: 1 hour  (market-linked)
-  Insurance:       24 hours (daily batch acceptable)
-  Cell/MoMo:       6 hours  (near-real-time required)
-  PBB:             12 hours (twice-daily batch)
-
-We track staleness per client per domain, and surface
-golden records that have fallen behind their SLAs for
-remediation before they reach RM briefings.
-
-DISCLAIMER: This project is not a sanctioned initiative
-of Standard Bank Group, MTN, or any affiliated entity.
-It is a demonstration of concept, domain knowledge,
-and data engineering skill by Thabo Kunene.
+@file freshness_monitor.py
+@description Monitors the freshness of each domain's contribution to the unified
+    golden record. A golden record is only as current as its stalest domain input.
+    Tracks latency per domain per client, classifies staleness into four bands
+    (FRESH/SLIGHTLY_STALE/STALE/VERY_STALE/MISSING), and surfaces records that
+    have breached their SLAs before they reach RM briefings or NBA scoring.
+@author Thabo Kunene
+@created 2026-03-18
 """
+# Domain SLAs (maximum acceptable ingestion latency):
+#   CIB payments:    4 hours  — high-value, time-sensitive transactions
+#   Forex positions: 1 hour   — market-linked; intraday positions change rapidly
+#   Insurance:      24 hours  — daily batch acceptable for policy data
+#   Cell/MoMo:       6 hours  — near-real-time required for workforce signals
+#   PBB:            12 hours  — twice-daily payroll batch is sufficient
+#
+# DISCLAIMER: This project is not a sanctioned initiative
+# of Standard Bank Group, MTN, or any affiliated entity.
+# It is a demonstration of concept, domain knowledge,
+# and data engineering skill by Thabo Kunene.
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -33,21 +31,30 @@ logger = get_logger("integration.unified_golden_record.freshness_monitor")
 
 
 class DomainStaleness(Enum):
-    """Staleness level for a domain contribution."""
-    FRESH = "fresh"             # Within SLA
-    SLIGHTLY_STALE = "slightly_stale"  # 1–2x SLA
-    STALE = "stale"             # 2–5x SLA
-    VERY_STALE = "very_stale"   # >5x SLA
-    MISSING = "missing"         # No data at all
+    """Staleness level for a domain's contribution to a golden record.
+
+    Bands are defined relative to the domain's SLA:
+      FRESH          → latency <= 1x SLA   (within acceptable window)
+      SLIGHTLY_STALE → latency 1–2x SLA   (approaching breach)
+      STALE          → latency 2–5x SLA   (SLA breached)
+      VERY_STALE     → latency > 5x SLA   (serious data quality concern)
+      MISSING        → no data at all      (domain did not feed this record)
+    """
+    FRESH = "fresh"                        # Within SLA — safe for RM use
+    SLIGHTLY_STALE = "slightly_stale"      # Approaching SLA breach — monitor
+    STALE = "stale"                        # SLA breached — investigate pipeline
+    VERY_STALE = "very_stale"              # Serious staleness — not usable for briefings
+    MISSING = "missing"                    # Domain never contributed to this record
 
 
-# Domain-level freshness SLAs in minutes
+# Domain-level freshness SLAs in minutes — the maximum acceptable data latency
+# for each domain before its contribution is considered stale.
 DOMAIN_SLA_MINUTES: Dict[str, int] = {
-    "cib": 240,        # 4 hours
-    "forex": 60,       # 1 hour
-    "insurance": 1440, # 24 hours
-    "cell": 360,       # 6 hours
-    "pbb": 720,        # 12 hours
+    "cib": 240,        # 4 hours — high-value corporate payment flows
+    "forex": 60,       # 1 hour  — intraday positions change with market moves
+    "insurance": 1440, # 24 hours — daily policy batch is acceptable
+    "cell": 360,       # 6 hours  — near-real-time workforce signals
+    "pbb": 720,        # 12 hours — twice-daily payroll ingestion
 }
 
 
@@ -105,45 +112,70 @@ class GoldenRecordFreshness:
 
 
 def _classify_staleness(latency_minutes: float, sla_minutes: int) -> DomainStaleness:
+    """Classify a latency value into a DomainStaleness band.
+
+    Uses ratio = latency / SLA to classify relative to the domain's own SLA
+    rather than absolute minutes, so a 2-hour-old CIB record and a 2-hour-old
+    forex record are treated differently (CIB SLA = 4h; forex SLA = 1h).
+
+    :param latency_minutes: Minutes elapsed since the domain last updated.
+    :param sla_minutes: Domain SLA in minutes from DOMAIN_SLA_MINUTES.
+    :return: DomainStaleness classification for this latency.
+    """
+    # Guard: if SLA is 0 (misconfiguration), treat as infinitely stale
     ratio = latency_minutes / sla_minutes if sla_minutes > 0 else float("inf")
     if ratio <= 1.0:
-        return DomainStaleness.FRESH
+        return DomainStaleness.FRESH          # Within SLA
     elif ratio <= 2.0:
-        return DomainStaleness.SLIGHTLY_STALE
+        return DomainStaleness.SLIGHTLY_STALE # Up to 2x SLA — monitor
     elif ratio <= 5.0:
-        return DomainStaleness.STALE
+        return DomainStaleness.STALE          # 2–5x SLA — investigate
     else:
-        return DomainStaleness.VERY_STALE
+        return DomainStaleness.VERY_STALE     # >5x SLA — critical
 
 
 def _staleness_rank(s: DomainStaleness) -> int:
+    """Return an integer rank for a DomainStaleness value.
+
+    Used by max() to identify the worst staleness level across all domains
+    in a golden record without comparing enum members directly.
+
+    :param s: DomainStaleness value to rank.
+    :return: Integer rank (0 = FRESH, 4 = MISSING/worst).
+    """
     return {
-        DomainStaleness.FRESH: 0,
-        DomainStaleness.SLIGHTLY_STALE: 1,
-        DomainStaleness.STALE: 2,
-        DomainStaleness.VERY_STALE: 3,
-        DomainStaleness.MISSING: 4,
+        DomainStaleness.FRESH: 0,           # Best: data is current
+        DomainStaleness.SLIGHTLY_STALE: 1,  # Approaching SLA
+        DomainStaleness.STALE: 2,           # SLA breached
+        DomainStaleness.VERY_STALE: 3,      # Serious lateness
+        DomainStaleness.MISSING: 4,         # Worst: no data at all
     }[s]
 
 
 class GoldenRecordFreshnessMonitor:
-    """
-    We monitor the freshness of unified golden records.
+    """We monitor the freshness of unified golden records across all domains.
 
-    We track last-update timestamps per domain per client
-    and surface staleness issues before they affect RM
-    briefing quality or NBA model scoring.
+    Tracks last-update timestamps per domain per client and surfaces
+    staleness issues before they propagate to RM briefings or NBA
+    model scoring, where stale data could trigger incorrect recommendations.
 
     Attributes:
-        domain_slas: SLA minutes per domain
-        freshness_cache: Freshness per golden_id
+        domain_slas: Dict of domain → SLA minutes (merged from defaults + custom overrides)
+        freshness_cache: Dict of golden_id → most recent GoldenRecordFreshness result
     """
 
     def __init__(
         self,
         custom_slas: Optional[Dict[str, int]] = None
     ) -> None:
+        """Initialise the monitor with default SLAs and optional custom overrides.
+
+        :param custom_slas: Optional dict of domain → SLA minutes to override defaults.
+                            Useful for testing or environment-specific SLA adjustments.
+        """
+        # Merge: start with platform defaults, then apply any custom overrides
         self.domain_slas = {**DOMAIN_SLA_MINUTES, **(custom_slas or {})}
+        # In-memory cache: updated on every check_freshness() call
         self.freshness_cache: Dict[str, GoldenRecordFreshness] = {}
         logger.info(
             f"GoldenRecordFreshnessMonitor initialized, "
@@ -156,17 +188,18 @@ class GoldenRecordFreshnessMonitor:
         domain_updates: Dict[str, Optional[datetime]],
         reference_time: Optional[datetime] = None,
     ) -> GoldenRecordFreshness:
-        """
-        Check freshness of all domains for a golden record.
+        """Check freshness of all domains for a single golden record.
 
-        Args:
-            golden_id: Golden record identifier
-            domain_updates: Dict of domain → last_update datetime (None = missing)
-            reference_time: Time to compute latency against (defaults to now)
+        Computes latency for each domain relative to reference_time (or now),
+        classifies each into a staleness band, and assembles an aggregate
+        GoldenRecordFreshness that reflects the worst domain.
 
-        Returns:
-            GoldenRecordFreshness with domain breakdown
+        :param golden_id: Golden record identifier being checked.
+        :param domain_updates: Dict of domain → last_update datetime (None = no data).
+        :param reference_time: Time to measure latency against; defaults to UTC now.
+        :return: GoldenRecordFreshness with per-domain status and aggregate staleness.
         """
+        # Use provided reference time or default to UTC now for reproducibility in tests
         now = reference_time or datetime.utcnow()
         statuses: List[DomainFreshnessStatus] = []
 
@@ -174,16 +207,18 @@ class GoldenRecordFreshnessMonitor:
             last_updated = domain_updates.get(domain)
 
             if last_updated is None:
+                # Domain has never written to this golden record — treat as missing
                 status = DomainFreshnessStatus(
                     golden_id=golden_id,
                     domain=domain,
                     last_updated=None,
                     sla_minutes=sla_minutes,
-                    latency_minutes=float("inf"),
+                    latency_minutes=float("inf"),  # Infinite latency: no timestamp
                     staleness=DomainStaleness.MISSING,
-                    is_sla_breached=True,
+                    is_sla_breached=True,           # Missing always breaches SLA
                 )
             else:
+                # Compute latency in minutes from the last domain update to now
                 latency = (now - last_updated).total_seconds() / 60
                 staleness = _classify_staleness(latency, sla_minutes)
                 status = DomainFreshnessStatus(
@@ -193,15 +228,18 @@ class GoldenRecordFreshnessMonitor:
                     sla_minutes=sla_minutes,
                     latency_minutes=round(latency, 1),
                     staleness=staleness,
-                    is_sla_breached=latency > sla_minutes,
+                    is_sla_breached=latency > sla_minutes,  # Any latency > SLA is a breach
                 )
 
             statuses.append(status)
 
+        # The overall staleness is the worst single-domain staleness
         worst = max(statuses, key=lambda s: _staleness_rank(s.staleness))
+        # Domains at STALE or worse need investigation (SLIGHTLY_STALE is just a warning)
         stale = [s.domain for s in statuses if s.staleness not in (
             DomainStaleness.FRESH, DomainStaleness.SLIGHTLY_STALE
         )]
+        # Domains with no data at all — these may indicate pipeline outages
         missing = [s.domain for s in statuses if s.staleness == DomainStaleness.MISSING]
 
         result = GoldenRecordFreshness(
@@ -211,6 +249,7 @@ class GoldenRecordFreshnessMonitor:
             stale_domains=stale,
             missing_domains=missing,
         )
+        # Update the in-memory cache for subsequent get_stale_records() calls
         self.freshness_cache[golden_id] = result
         return result
 
@@ -218,10 +257,14 @@ class GoldenRecordFreshnessMonitor:
         self,
         records: List[Dict[str, Any]],
     ) -> List[GoldenRecordFreshness]:
-        """
-        Check freshness for a batch of golden records.
+        """Check freshness for a batch of golden records in sequence.
 
-        Each dict must have 'golden_id' and 'domain_updates' keys.
+        Each dict in the list must have 'golden_id' and 'domain_updates' keys.
+        Delegates to check_freshness() for each record so the cache is populated
+        for all records after this call.
+
+        :param records: List of dicts with 'golden_id' and 'domain_updates'.
+        :return: List of GoldenRecordFreshness in the same order as input.
         """
         return [
             self.check_freshness(r["golden_id"], r["domain_updates"])
@@ -232,30 +275,49 @@ class GoldenRecordFreshnessMonitor:
         self,
         min_staleness: DomainStaleness = DomainStaleness.STALE,
     ) -> List[GoldenRecordFreshness]:
-        """Get all golden records at or above a staleness threshold."""
+        """Get all golden records at or above a given staleness threshold.
+
+        Uses _staleness_rank() for threshold comparison so the caller can pass
+        any DomainStaleness value as the minimum acceptable level.
+
+        :param min_staleness: Minimum staleness level to include (default: STALE).
+        :return: List of GoldenRecordFreshness objects from the cache.
+        """
         min_rank = _staleness_rank(min_staleness)
+        # Return records whose overall staleness rank meets or exceeds the minimum
         return [
             r for r in self.freshness_cache.values()
             if _staleness_rank(r.overall_staleness) >= min_rank
         ]
 
     def get_statistics(self) -> Dict[str, Any]:
-        """Get freshness monitoring statistics."""
+        """Get aggregated freshness statistics across all monitored golden records.
+
+        Used by monitoring dashboards and CI health checks to track data pipeline
+        SLA compliance per domain across the full golden record population.
+
+        :return: Dict with record counts, stale record count, and per-domain breakdown.
+        """
+        # Flatten all domain statuses from the cache into a single list
         all_statuses = [
             s
             for r in self.freshness_cache.values()
             for s in r.domain_statuses
         ]
+        # Build per-domain staleness band counts for the freshness_by_domain output
         by_domain: Dict[str, Dict[str, int]] = {}
         for s in all_statuses:
             if s.domain not in by_domain:
                 by_domain[s.domain] = {}
             key = s.staleness.value
+            # Increment the count for this domain+staleness combination
             by_domain[s.domain][key] = by_domain[s.domain].get(key, 0) + 1
 
         return {
             "total_golden_records_monitored": len(self.freshness_cache),
+            # Count of records where overall staleness is STALE or worse
             "stale_records": len(self.get_stale_records()),
+            # Count of records where at least one domain has no data
             "missing_data_records": sum(
                 1 for r in self.freshness_cache.values()
                 if r.missing_domains

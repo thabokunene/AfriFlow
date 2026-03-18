@@ -1,41 +1,129 @@
+# =============================================================================
+# @file kafka-cluster.yml
+# @description Deploys a production-grade Apache Kafka cluster inside
+#              Kubernetes using the Strimzi operator (kafka.strimzi.io).
+#              Kafka is the central event backbone for AfriFlow: every domain
+#              (forex, PBB, insurance, cell, CIB) publishes and consumes
+#              events through this cluster. The configuration prioritises
+#              durability (replication factor 3, min-ISR 2) and zero data
+#              loss over raw throughput.
+# @author Thabo Kunene
+# @created 2026-03-17
+# =============================================================================
+
+# Kafka CRD provided by the Strimzi operator. Strimzi translates this single
+# resource into the full set of StatefulSets, Services, and ConfigMaps needed
+# to run a production Kafka cluster, dramatically reducing operational overhead
+# compared to managing those primitives by hand.
 apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata:
+  # Logical name used by producers and consumers to discover the cluster
+  # via the Strimzi-generated bootstrap service afriflow-kafka-kafka-bootstrap.
   name: afriflow-kafka
+  # Scoped to the AfriFlow namespace defined in namespace.yml so that network
+  # policies and RBAC rules apply consistently.
   namespace: afriflow
 spec:
+  # ---- Kafka broker configuration ----------------------------------------
   kafka:
+    # Kafka 3.5.1 is the latest stable release that aligns with the Strimzi
+    # v0.36+ operator version used in this cluster. Pinning the version
+    # prevents unexpected upgrades during operator updates.
     version: 3.5.1
+
+    # Three brokers provide fault tolerance: the cluster tolerates one broker
+    # failure while still satisfying min.insync.replicas=2. Fewer than 3 would
+    # risk data loss; more than 3 would be over-provisioned for AfriFlow's
+    # current message volume.
     replicas: 3
+
     listeners:
+      # Plain (unencrypted) listener for internal microservice-to-broker
+      # traffic. Safe inside the cluster because Kubernetes NetworkPolicy
+      # restricts access to the afriflow namespace only.
       - name: plain
         port: 9092
-        type: internal
-        tls: false
+        type: internal   # Only reachable within the cluster
+        tls: false       # No TLS on internal path; reduces CPU overhead
+
+      # TLS listener used by any client that requires in-flight encryption,
+      # e.g. cross-namespace consumers or compliance-sensitive pipelines.
       - name: tls
         port: 9093
         type: internal
-        tls: true
+        tls: true        # Mutual TLS can be layered on top via Strimzi cert management
+
     config:
+      # Offsets topic holds consumer group committed offsets — replicate to all
+      # 3 brokers so no offset is lost if a broker goes down.
       offsets.topic.replication.factor: 3
+
+      # The transaction coordinator log stores two-phase commit state for
+      # exactly-once semantics. Replicating to 3 with min-ISR 2 means a
+      # transaction can commit even if one broker is temporarily unavailable.
       transaction.state.log.replication.factor: 3
       transaction.state.log.min.isr: 2
+
+      # Any topic created without an explicit replication factor inherits
+      # this default, ensuring new topics are always durable.
       default.replication.factor: 3
+
+      # A produce request only succeeds when at least 2 of the 3 replicas
+      # have acknowledged the write. Combined with acks=all on producers,
+      # this guarantees no committed message is lost even on single-broker
+      # failure.
       min.insync.replicas: 2
+
+      # Inter-broker RPC must match the installed Kafka version. Using the
+      # string form prevents Strimzi from interpreting it as a float and
+      # rounding it (e.g. 3.5 vs 3.50).
       inter.broker.protocol.version: "3.5"
+
     storage:
+      # JBOD (Just a Bunch Of Disks) lets each broker manage multiple
+      # independent volumes, improving I/O parallelism. Even with a single
+      # volume defined here the pattern is future-proof — adding a second
+      # volume id only requires appending to this list.
       type: jbod
       volumes:
       - id: 0
+        # PersistentVolumeClaim-backed storage survives pod restarts and
+        # rescheduling, which is mandatory for a stateful message broker.
         type: persistent-claim
+        # 100 GiB per broker accommodates several days of retention for
+        # AfriFlow's estimated peak throughput (hundreds of MB/s across all
+        # domains) while keeping storage costs manageable.
         size: 100Gi
+        # Retaining the PVC on cluster deletion protects against accidental
+        # data loss — a new cluster can reattach the same volumes.
         deleteClaim: false
+
+  # ---- ZooKeeper configuration -------------------------------------------
+  # ZooKeeper manages Kafka controller elections and cluster metadata.
+  # (Strimzi will migrate to KRaft/KIP-500 in a future release, at which
+  # point this section will be removed.)
   zookeeper:
+    # Three ZooKeeper nodes form a quorum that tolerates one node failure.
+    # An even number (2 or 4) would not form a majority quorum and is not
+    # supported.
     replicas: 3
     storage:
       type: persistent-claim
+      # ZooKeeper stores only metadata (topic configs, ACLs, controller
+      # election state) — 10 GiB is more than sufficient.
       size: 10Gi
+      # Same rationale as the Kafka broker PVC — prevent accidental deletion.
       deleteClaim: false
+
+  # ---- Entity Operator ------------------------------------------------------
+  # The Entity Operator runs as a sidecar alongside ZooKeeper and reconciles
+  # KafkaTopic and KafkaUser CRDs, allowing topics and users to be managed
+  # declaratively alongside the rest of the infrastructure.
   entityOperator:
+    # Empty braces use Strimzi defaults: one Topic Operator replica watching
+    # the afriflow namespace for KafkaTopic resources.
     topicOperator: {}
+    # Empty braces use Strimzi defaults: one User Operator replica managing
+    # KafkaUser credentials and ACLs.
     userOperator: {}

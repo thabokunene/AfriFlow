@@ -1,3 +1,9 @@
+<!--
+@file COMPETITIVE_ANALYSIS.md
+@description Competitive positioning analysis comparing AfriFlow to banks, fintechs, and legacy stacks
+@author Thabo Kunene
+@created 2026-03-17
+-->
 <!-- docs/COMPETITIVE_ANALYSIS.md -->
 
 # AfriFlow Competitive Positioning

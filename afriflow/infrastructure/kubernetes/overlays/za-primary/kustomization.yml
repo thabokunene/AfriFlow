@@ -1,0 +1,220 @@
+# =============================================================================
+# @file kustomization.yml
+# @description Kustomize overlay for the South Africa primary deployment
+#              (za-primary). This is the reference/headquarters pod and the
+#              most resource-intensive deployment in the AfriFlow cluster.
+#              Za-primary hosts:
+#                - The Standard Bank CIB and PBB domains (largest data volumes)
+#                - The primary Kafka cluster used for inter-pod event routing
+#                - The Flink session cluster running the entity resolution job
+#                - The Spark operator managing end-of-day batch reconciliations
+#              Resource allocations here are the largest of all country pods
+#              and serve as the baseline from which ke-pod and ng-pod scale down.
+# @author Thabo Kunene
+# @created 2026-03-17
+# =============================================================================
+
+# Kustomize overlay definition for the South Africa primary deployment.
+# Apply with: kubectl apply -k overlays/za-primary/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# ---- Base resources -------------------------------------------------------
+# Inherit all resources from base/. Za-primary applies the largest patches
+# (highest replica counts, largest resource limits) compared to other overlays.
+resources:
+  - ../../base
+
+# ---- Namespace override ---------------------------------------------------
+namespace: afriflow
+
+# ---- Common labels applied to every resource in this overlay --------------
+# Labels allow filtering all South Africa primary resources with:
+#   kubectl get all -l afriflow/country-pod=za
+commonLabels:
+  afriflow/country-pod: za            # ISO 3166-1 alpha-2 code for South Africa
+  afriflow/region: southern-africa    # Broad geographic grouping
+  afriflow/environment: production
+  afriflow/tier: primary              # Distinguishes za-primary from any future za-secondary
+
+# ---- Common annotations --------------------------------------------------
+commonAnnotations:
+  afriflow/deployment-region: af-south-1      # AWS Cape Town region (real AWS region)
+  afriflow/managed-by: kustomize
+  afriflow/country-contact: ops-za@afriflow   # South Africa pod on-call contact
+  afriflow/primary-pod: "true"               # Signals to tooling that this is the hub pod
+
+# ---- Images ---------------------------------------------------------------
+images:
+  - name: flink
+    newName: flink
+    newTag: "1.18.0"
+  - name: docker.io/kubeflow/spark-operator
+    newName: docker.io/kubeflow/spark-operator
+    newTag: "v1beta2-1.5.0-3.3.0"
+
+# ---- ConfigMap generators -------------------------------------------------
+# South Africa primary runtime configuration. ZA handles both local ZAR
+# transactions and inter-pod routing of cross-currency events.
+configMapGenerator:
+  - name: afriflow-za-config
+    literals:
+      - COUNTRY_CODE=ZA
+      - CURRENCY_CODE=ZAR                     # South African Rand
+      - KAFKA_TOPIC_PREFIX=za                 # Topics prefixed "za." for this pod
+      - FLINK_PARALLELISM=16                  # Highest parallelism: 4 TMs × 4 slots
+      - SPARK_EXECUTOR_INSTANCES=4            # Base executor count for ZA batch jobs
+      - TIMEZONE=Africa/Johannesburg          # SAST (UTC+2), no DST
+      - DATA_RETENTION_DAYS=365              # SARB (South African Reserve Bank) 1-year minimum
+      - MNO_PARTNER=MTN_SA                   # Primary MNO for cell domain
+      - ENTITY_RESOLUTION_ENABLED=true       # ZA is the primary entity resolution hub
+      - CROSS_POD_ROUTING_ENABLED=true       # ZA routes events to ke and ng pods
+      - SARB_REPORTING_ENABLED=true          # Regulatory reporting to South African Reserve Bank
+      - SARS_REPORTING_ENABLED=true          # SARS (tax authority) compliance reporting
+
+# ---- Patches --------------------------------------------------------------
+# Za-primary uses the maximum resource allocation in the AfriFlow deployment.
+patches:
+  # Scale Flink TaskManager to 4 replicas for South Africa.
+  # ZA runs entity resolution, cross-domain signal generation, and CIB
+  # profitability calculations concurrently, requiring 16 task slots
+  # (4 TMs × 4 slots) to avoid slot starvation.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: flink-taskmanager
+        namespace: afriflow
+      spec:
+        replicas: 4  # 4 TMs × 4 slots = 16 total slots for za parallelism=16
+    target:
+      kind: Deployment
+      name: flink-taskmanager
+
+  # Increase TaskManager memory for ZA's large RocksDB state (entity
+  # resolution over tens of millions of customer records requires >4 GiB
+  # of state per TaskManager).
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: flink-taskmanager
+        namespace: afriflow
+      spec:
+        template:
+          spec:
+            containers:
+              - name: taskmanager
+                resources:
+                  requests:
+                    cpu: "4"     # More CPU for entity resolution hash joins
+                    memory: "8Gi"  # 8Gi for large RocksDB state backend
+                  limits:
+                    cpu: "4"
+                    memory: "8Gi"
+    target:
+      kind: Deployment
+      name: flink-taskmanager
+
+  # Increase JobManager resources for ZA: coordinating 16 concurrent task
+  # slots and managing checkpoint metadata for large state requires more
+  # than the base 2 CPU / 4 GiB allocation.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: flink-jobmanager
+        namespace: afriflow
+      spec:
+        template:
+          spec:
+            containers:
+              - name: jobmanager
+                resources:
+                  requests:
+                    cpu: "2"
+                    memory: "4Gi"
+                  limits:
+                    cpu: "4"
+                    memory: "8Gi"  # Larger limit to handle ZA's job graph complexity
+    target:
+      kind: Deployment
+      name: flink-jobmanager
+
+  # Maximise Spark dynamic allocation for ZA's large batch windows. End-of-day
+  # reconciliation jobs process millions of CIB and PBB records and require
+  # up to 10 executors to complete within the overnight batch window.
+  - patch: |-
+      apiVersion: sparkoperator.k8s.io/v1beta2
+      kind: SparkApplication
+      metadata:
+        name: spark-py-template
+        namespace: afriflow
+      spec:
+        dynamicAllocation:
+          initialExecutors: 4   # Start with 4 to reduce cold-start latency
+          minExecutors: 2       # Keep 2 executors warm to avoid full cold-start
+          maxExecutors: 10      # Maximum 10 executors = 20 cores + 40 GiB at peak
+    target:
+      kind: SparkApplication
+      name: spark-py-template
+
+  # Apply the South Africa node selector to JobManager pods.
+  # Za-primary nodes are in the af-south-1 (Cape Town) AWS region and are
+  # provisioned with the highest network bandwidth for cross-pod routing.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: flink-jobmanager
+        namespace: afriflow
+      spec:
+        template:
+          spec:
+            nodeSelector:
+              afriflow/node-type: streaming
+              afriflow/country-pod: za   # Targets Cape Town streaming node pool
+    target:
+      kind: Deployment
+      name: flink-jobmanager
+
+  # Apply the South Africa node selector to TaskManager pods.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: flink-taskmanager
+        namespace: afriflow
+      spec:
+        template:
+          spec:
+            nodeSelector:
+              afriflow/node-type: streaming
+              afriflow/country-pod: za
+    target:
+      kind: Deployment
+      name: flink-taskmanager
+
+  # Increase Spark Operator memory limit for ZA: managing 10 concurrent
+  # SparkApplications (vs. 5 for KE) requires more operator heap.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: spark-operator
+        namespace: afriflow
+      spec:
+        template:
+          spec:
+            containers:
+              - name: spark-operator
+                resources:
+                  requests:
+                    cpu: "500m"
+                    memory: "1Gi"   # Double the base request for ZA's higher job count
+                  limits:
+                    cpu: "1000m"
+                    memory: "2Gi"
+    target:
+      kind: Deployment
+      name: spark-operator

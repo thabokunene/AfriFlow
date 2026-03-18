@@ -1,4 +1,11 @@
 """
+@file corridor_aggregator.py
+@description Aggregates corridor-level metrics with RBAC validation and safe no-op processing flag
+@author Thabo Kunene
+@created 2026-03-17
+"""
+
+"""
 Corridor Aggregator (CIB, Flink-style).
 
 We provide a minimal, security-hardened Processor stub to aggregate or pass
@@ -6,11 +13,11 @@ through corridor-level payment metrics in streaming jobs. This stub implements
 validation, RBAC, and error handling to ensure safe defaults.
 """
 
-import logging
+import logging  # Operational logger for RBAC, validation, and processing outcomes
 from typing import Any, Dict
 
-from afriflow.domains.shared.interfaces import BaseProcessor
-from afriflow.domains.shared.config import get_config
+from afriflow.domains.shared.interfaces import BaseProcessor  # Shared processing contract
+from afriflow.domains.shared.config import get_config  # Environment-aware config for RBAC
 
 
 class Processor(BaseProcessor):

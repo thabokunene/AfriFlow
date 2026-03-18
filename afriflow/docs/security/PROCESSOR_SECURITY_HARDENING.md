@@ -1,3 +1,9 @@
+<!--
+@file PROCESSOR_SECURITY_HARDENING.md
+@description Security controls for processors: RBAC, source attribution, input limits
+@author Thabo Kunene
+@created 2026-03-17
+-->
 # Processor Security Hardening Overview
 
 This document outlines the security controls implemented in the 20 Processing modules, each providing a minimal `Processor` class that directly implements `BaseProcessor` from `domains.shared.interfaces`.

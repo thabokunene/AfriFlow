@@ -1,8 +1,12 @@
-# AfriFlow Terraform - Main Configuration
-#
-# We define AWS infrastructure for the AfriFlow platform
-# including EKS cluster, VPC, RDS, MSK, and all supporting
-# resources.
+# =============================================================================
+# @file main.tf
+# @description Root Terraform configuration for the AfriFlow platform on AWS.
+#              Provisions VPC, EKS cluster, MSK (Kafka), RDS (PostgreSQL),
+#              S3 Delta Lake buckets, KMS keys, CloudWatch log groups,
+#              IAM roles, and security groups.
+# @author Thabo Kunene
+# @created 2026-03-17
+# =============================================================================
 #
 # DISCLAIMER: This project is not a sanctioned initiative
 # of Standard Bank Group, MTN, or any affiliated entity.
@@ -259,6 +263,52 @@ resource "aws_msk_cluster" "afriflow_msk" {
 
   tags = {
     Name = "afriflow-msk"
+  }
+}
+
+# =============================================================================
+# RDS — Subnet Group
+#
+# The DB subnet group tells RDS which private subnets it may place the
+# primary and standby instances in.  Using all three private subnets ensures
+# Multi-AZ deployments can spread across every availability zone in the
+# region (af-south-1a/b/c) for maximum fault isolation.
+# =============================================================================
+
+resource "aws_db_subnet_group" "afriflow" {
+  name        = "afriflow-db-subnet-group"
+  description = "Subnet group for AfriFlow RDS metadata database — spans all private subnets for Multi-AZ support"
+  subnet_ids  = module.vpc.private_subnets
+
+  tags = {
+    Name    = "afriflow-db-subnet-group"
+    Purpose = "RDS metadata database subnet placement"
+  }
+}
+
+# DynamoDB table used by the Terraform S3 backend for state locking.
+# This prevents concurrent terraform applies from corrupting the state file.
+# Must be created before the backend is initialised; see README for bootstrap
+# instructions.
+resource "aws_dynamodb_table" "terraform_locks" {
+  name         = "afriflow-terraform-locks"
+  billing_mode = "PAY_PER_REQUEST"  # On-demand — lock operations are infrequent
+  hash_key     = "LockID"
+
+  attribute {
+    name = "LockID"
+    type = "S"
+  }
+
+  # Enable point-in-time recovery so the locks table can be restored if
+  # accidentally deleted alongside other resources.
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  tags = {
+    Name    = "afriflow-terraform-locks"
+    Purpose = "Terraform state locking — do not delete"
   }
 }
 

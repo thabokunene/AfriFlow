@@ -1,3 +1,7 @@
+# @file sim_deflation_factors.yml
+# @description SIM to Employee deflation factors for workforce estimation across countries
+# @author Thabo Kunene
+# @created 2026-03-17
 # config/sim_deflation_factors.yml
 
 # SIM to Employee deflation factors by country and sector.
@@ -5,20 +9,22 @@
 # DISCLAIMER: This project is not sanctioned by, affiliated with, or
 # endorsed by Standard Bank Group, MTN Group, or any of their subsidiaries.
 
+# Country-specific deflation factors convert SIM counts to estimated workforce size
+# Factors account for multiple SIM usage patterns and business vs. personal SIMs
 country_factors:
   ZA:
-    deflation_factor: 0.73
-    confidence: high
-    avg_sims_per_person: 1.3
+    deflation_factor: 0.73      # 73% of SIMs represent actual employees (high confidence)
+    confidence: high              # High confidence due to large PBB cross-reference dataset
+    avg_sims_per_person: 1.3    # Average 1.3 SIMs per person in South Africa
     last_calibrated: "2024-03-01"
-    calibration_source: "PBB payroll cross reference, 847 clients"
+    calibration_source: "PBB payroll cross reference, 847 clients"  # Large sample size
 
   NG:
-    deflation_factor: 0.31
-    confidence: medium
-    avg_sims_per_person: 2.8
+    deflation_factor: 0.31      # 31% of SIMs represent actual employees (low conversion)
+    confidence: medium            # Medium confidence due to limited sample size
+    avg_sims_per_person: 2.8    # High SIM multiplicity: 2.8 SIMs per person
     last_calibrated: "2024-02-15"
-    calibration_source: "PBB payroll cross reference, 234 clients"
+    calibration_source: "PBB payroll cross reference, 234 clients"  # Smaller sample size
 
   KE:
     deflation_factor: 0.43

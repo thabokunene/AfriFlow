@@ -1,4 +1,10 @@
-﻿# 03 Domain Contracts
+﻿<!--
+@file 03_DOMAIN_CONTRACTS.md
+@description Domain data contracts specification: formats, frequencies, quality, and SLAs
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 03 Domain Contracts
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

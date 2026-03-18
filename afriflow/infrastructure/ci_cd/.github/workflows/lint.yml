@@ -1,29 +1,74 @@
+# =============================================================================
+# @file lint.yml
+# @description GitHub Actions workflow that lints AfriFlow infrastructure code
+#              on every push to main/develop and on pull requests targeting main.
+#              Two parallel jobs run independently:
+#                tflint   — static analysis of Terraform HCL for best-practice violations
+#                yamllint — YAML schema/style validation for Docker Compose and Kubernetes manifests
+#              Path filters prevent the workflow from running on unrelated file changes.
+# @author Thabo Kunene
+# @created 2026-03-17
+# =============================================================================
+
 name: Lint Infrastructure
 
+# ---------------------------------------------------------------------------
+# TRIGGER CONDITIONS
+# Run only when infrastructure files change to avoid unnecessary CI usage
+# on documentation or application-only commits.
+# ---------------------------------------------------------------------------
 on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'afriflow/infrastructure/**'
+      - 'afriflow/infrastructure/**'    # Trigger on any infrastructure file change
   pull_request:
     branches: [ main ]
     paths:
       - 'afriflow/infrastructure/**'
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # JOB: tflint
+  # Runs TFLint against the Terraform module directory to catch configuration
+  # errors, deprecated arguments, and AWS/Azure/GCP provider rule violations
+  # before changes are merged and applied.
+  # ---------------------------------------------------------------------------
   tflint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest    # GitHub-hosted runner with Terraform tooling available
+
     steps:
+      # 1. Check out the repository so the Terraform files are present on the runner
       - uses: actions/checkout@v3
+
+      # 2. Install TFLint using the official setup action (latest stable version)
       - uses: terraform-linters/setup-tflint@v3
+
+      # 3. Execute TFLint against the Terraform directory.
+      #    Any rule violation causes a non-zero exit code, failing the job.
       - name: Run TFLint
         run: tflint afriflow/infrastructure/terraform
 
+  # ---------------------------------------------------------------------------
+  # JOB: yamllint
+  # Validates YAML syntax and style in Docker Compose and Kubernetes manifests.
+  # Catches issues like incorrect indentation, duplicate keys, and trailing
+  # spaces that can silently break deployments or cause hard-to-debug errors.
+  # ---------------------------------------------------------------------------
   yamllint:
     runs-on: ubuntu-latest
+
     steps:
+      # 1. Check out the repository so YAML files are available on the runner
       - uses: actions/checkout@v3
+
+      # 2. Install yamllint via pip — lightweight with no system dependencies
+      - name: Install yamllint
+        run: pip install yamllint
+
+      # 3. Run yamllint against Docker Compose and the entire Kubernetes directory.
+      #    Both are validated in a single command for efficiency; yamllint exits
+      #    non-zero if any file contains style or syntax violations.
       - name: Run yamllint
         run: |
-          pip install yamllint
           yamllint afriflow/infrastructure/docker-compose.yml afriflow/infrastructure/kubernetes

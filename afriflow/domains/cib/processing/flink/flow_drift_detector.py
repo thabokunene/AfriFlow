@@ -1,4 +1,11 @@
 """
+@file flow_drift_detector.py
+@description Detects drift in payment flows for CIB corridors using statistical baselines
+@author Thabo Kunene
+@created 2026-03-17
+"""
+
+"""
 CIB Flow Drift Detector.
 
 We detect significant changes in payment flow patterns
@@ -14,10 +21,10 @@ and data engineering skill by Thabo Kunene.
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import logging
+import logging  # Operational logging for initialization, anomalies, and alerts
 import statistics
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)  # Module-level logger
 
 
 @dataclass

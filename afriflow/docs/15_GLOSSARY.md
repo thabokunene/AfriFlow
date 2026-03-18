@@ -1,4 +1,10 @@
-﻿# 15 Glossary
+<!--
+@file 15_GLOSSARY.md
+@description Glossary of AfriFlow terms and cross-domain concepts used in documentation
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 15 Glossary
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

@@ -1,4 +1,11 @@
 """
+@file client_profitability.py
+@description Client profitability processor stub with RBAC validation and safe no-op processing
+@author Thabo Kunene
+@created 2026-03-17
+"""
+
+"""
 Client Profitability (CIB, Spark-style).
 
 We add a minimal, security-hardened Processor stub to support downstream
@@ -6,11 +13,11 @@ Spark jobs calculating client profitability. This focuses on validation and
 safe defaults while remaining a no-op for compatibility.
 """
 
-import logging
+import logging  # Operational logger for RBAC, validation, and processing outcomes
 from typing import Any, Dict
 
-from afriflow.domains.shared.interfaces import BaseProcessor
-from afriflow.domains.shared.config import get_config
+from afriflow.domains.shared.interfaces import BaseProcessor  # Shared processing contract
+from afriflow.domains.shared.config import get_config  # Environment-aware config for RBAC
 
 
 class Processor(BaseProcessor):

@@ -1,4 +1,9 @@
-<!-- docs/DOMAIN_CONTRACTS.md -->
+<!--
+@file DOMAIN_CONTRACTS.md
+@description Defines domain data contracts, schemas, SLAs, and quality thresholds
+@author Thabo Kunene
+@created 2026-03-17
+-->
 
 # Domain Data Contracts
 

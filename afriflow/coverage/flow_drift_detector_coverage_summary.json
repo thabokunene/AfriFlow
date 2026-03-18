@@ -1,0 +1,20 @@
+{
+  "include_subpath": "cib/processing/flink",
+  "rows": [
+    {
+      "module": "cib/processing/flink/flow_drift_detector.py",
+      "line_pct": 91.67,
+      "branch_pct": 78.57,
+      "func_pct": 100.0,
+      "lines_valid": 0,
+      "lines_covered": 0,
+      "branches_valid": 0,
+      "branches_covered": 0,
+      "func_total": 5,
+      "func_covered": 5,
+      "line_str": "91.7%",
+      "branch_str": "78.6%",
+      "func_str": "100.0% (5/5)"
+    }
+  ]
+}

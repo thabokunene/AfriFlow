@@ -1,4 +1,10 @@
-﻿# 12 Cost Model and Phasing
+<!--
+@file 12_COST_MODEL_AND_PHASING.md
+@description Cost categories and phasing plan for infrastructure, data engineering, and governance
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 12 Cost Model and Phasing
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

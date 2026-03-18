@@ -14,6 +14,7 @@
         "function_gate_env": "ENABLE_CELL_FUNC_GATE"
       },
       "gates": {
+        "coverage_subpath": "cell/ingestion",
         "line_min": 90,
         "branch_min": 90,
         "func_min": 90,
@@ -36,6 +37,7 @@
         "function_gate_env": "ENABLE_FOREX_FUNC_GATE"
       },
       "gates": {
+        "coverage_subpath": "forex/ingestion",
         "line_min": 90,
         "branch_min": 90,
         "func_min": 90,
@@ -58,6 +60,7 @@
         "function_gate_env": "ENABLE_CIB_FUNC_GATE"
       },
       "gates": {
+        "coverage_subpath": "cib/processing/flink",
         "line_min": 90,
         "branch_min": 0,
         "func_min": 0,

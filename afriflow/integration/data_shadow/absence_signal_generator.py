@@ -1,4 +1,14 @@
 """
+@file absence_signal_generator.py
+@description Generates structured absence signals from multi-domain client snapshots.
+             An absence signal is created when a domain has no data for a client
+             that is confirmed active in one or more other domains. These raw signals
+             feed the ShadowGapDetector for scoring and RM alert routing.
+             Absence signals capture five categories: FOREX_ABSENT, INSURANCE_ABSENT,
+             CELL_ABSENT, PBB_ABSENT, and CIB_ABSENT, plus DATA_STALE for aged data.
+@author Thabo Kunene
+@created 2026-03-18
+
 Data Shadow - Absence Signal Generator
 
 We generate structured absence signals from raw domain
@@ -23,25 +33,32 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Dict, List, Optional, Any
-from enum import Enum
+from dataclasses import dataclass, field  # structured absence signal value objects
+from datetime import datetime             # stale-data age calculation and signal timestamps
+from typing import Dict, List, Optional, Any  # full type annotations
+from enum import Enum                    # typed absence categories
 
-from afriflow.logging_config import get_logger
+from afriflow.logging_config import get_logger  # structured logging for signal generation
 
+# Module-level logger — log at DEBUG for signal-level detail, INFO for batch summaries
 logger = get_logger("integration.data_shadow.absence_signal_generator")
 
 
 class AbsenceType(Enum):
-    """Type of domain absence."""
+    """
+    Type of domain absence detected for a client.
+
+    Each value corresponds to a specific cross-domain expectation
+    rule. DATA_STALE covers situations where the domain snapshot
+    is older than the 48-hour freshness threshold.
+    """
     FOREX_ABSENT = "forex_absent"
     INSURANCE_ABSENT = "insurance_absent"
     CELL_ABSENT = "cell_absent"
     PBB_ABSENT = "pbb_absent"
     CIB_ABSENT = "cib_absent"
-    DATA_STALE = "data_stale"         # Domain present but outdated
-    PARTIAL_ABSENCE = "partial_absence"  # Some data but incomplete
+    DATA_STALE = "data_stale"         # Domain present but outdated (> 48 hours)
+    PARTIAL_ABSENCE = "partial_absence"  # Some data but incomplete or sparse
 
 
 @dataclass
@@ -83,7 +100,10 @@ class AbsenceSignalGenerator:
         signals: Generated signals by client ID
     """
 
-    # Revenue risk estimates per absent domain (USD per year)
+    # Annual revenue risk estimates (USD) for each absent domain.
+    # CIB absence is the most valuable miss because CIB relationships
+    # anchor all other product sales. Forex absence is second because
+    # FX hedging is a recurring high-margin product.
     DOMAIN_REVENUE_RISK = {
         "forex": 50_000,
         "insurance": 30_000,
@@ -93,7 +113,12 @@ class AbsenceSignalGenerator:
     }
 
     def __init__(self) -> None:
+        """
+        Initialise the absence signal generator with empty signal store.
+        """
+        # Dict of client_golden_id → list of AbsenceSignal objects
         self.signals: Dict[str, List[AbsenceSignal]] = {}
+        # Sequential counter for building unique signal IDs
         self._counter = 0
         logger.info("AbsenceSignalGenerator initialized")
 
@@ -190,29 +215,50 @@ class AbsenceSignalGenerator:
         present_domains: List[str],
         snapshots: Dict[str, Any],
     ) -> float:
-        """Compute signal strength based on presence/absence combination."""
-        # Key rules: which present domains imply which absent domains
+        """
+        Compute signal strength (0–1) based on the presence/absence combination.
+
+        The logic follows domain knowledge rules: certain present domains strongly
+        imply that the absent domain should also be present. The more "implying"
+        domains are active, the stronger the signal. CIB payment volume further
+        amplifies the strength — a client with USD 2M in CIB payments who has
+        no FX hedging is a much stronger signal than one with USD 50k.
+
+        :param absent_domain: The domain where data is unexpectedly missing
+        :param present_domains: Domains where the client has confirmed activity
+        :param snapshots: Full domain snapshot dict for CIB volume lookup
+        :return: Signal strength in [0.0, 1.0]
+        """
+        # Implication rules: which present domains indicate the absent one
+        # should exist. These encode domain knowledge about co-occurrence patterns.
         rules: Dict[str, List[str]] = {
-            "forex": ["cib"],            # CIB without forex is suspicious
-            "insurance": ["cib"],        # Large CIB without insurance
-            "cell": ["cib", "pbb"],      # Corporate without cell
-            "pbb": ["cib"],              # CIB without any PBB = no retail
-            "cib": ["cell", "pbb"],      # Retail without CIB
+            "forex": ["cib"],            # CIB without forex hedging is suspicious
+            "insurance": ["cib"],        # Large CIB operations without asset insurance
+            "cell": ["cib", "pbb"],      # Corporate activity without any SIM presence
+            "pbb": ["cib"],              # CIB relationship without PBB payroll = no retail capture
+            "cib": ["cell", "pbb"],      # Retail banking activity without any CIB = upside opportunity
         }
         implying = rules.get(absent_domain, [])
+        # Count how many of the implying domains are actually present
         overlap = [d for d in implying if d in present_domains]
 
+        # If none of the implying domains are present, signal is zero
         if not overlap:
             return 0.0
 
-        # Scale by CIB activity size if available
+        # Base strength = fraction of implying domains that are confirmed present
         base_strength = len(overlap) / max(len(implying), 1)
+
+        # Amplify based on CIB annual payment volume.
+        # High-volume clients with missing domains represent bigger revenue risk.
         cib_data = snapshots.get("cib", {}) or {}
         cib_volume = cib_data.get("annual_payment_volume_usd", 0)
 
         if cib_volume > 1_000_000:
+            # Enterprise client — 30% signal boost
             return min(1.0, base_strength * 1.3)
         elif cib_volume > 100_000:
+            # Mid-market client — 10% signal boost
             return min(1.0, base_strength * 1.1)
         return base_strength
 
@@ -255,15 +301,28 @@ class AbsenceSignalGenerator:
         )
 
     def _is_stale(self, snapshot: Dict[str, Any]) -> bool:
-        """Check if snapshot data is older than 48 hours."""
+        """
+        Check if a domain snapshot is older than the 48-hour freshness threshold.
+
+        Stale data is treated as a separate signal type (DATA_STALE) because
+        aged domain data can produce false negatives in cross-domain matching
+        and should be flagged for data pipeline investigation.
+
+        :param snapshot: Domain snapshot dict that may contain 'last_updated'
+        :return: True if snapshot is stale (> 48 hours old), False otherwise
+        """
         last_updated = snapshot.get("last_updated")
+        # If no timestamp present, we cannot determine staleness — treat as fresh
         if not last_updated:
             return False
+        # Parse ISO format strings to datetime for comparison
         if isinstance(last_updated, str):
             try:
                 last_updated = datetime.fromisoformat(last_updated)
             except ValueError:
+                # Unparseable timestamp — treat as fresh to avoid false positives
                 return False
+        # Calculate age in seconds; flag if older than 48 hours
         delta = (datetime.utcnow() - last_updated).total_seconds()
         return delta > 48 * 3600
 

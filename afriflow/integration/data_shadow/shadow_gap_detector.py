@@ -1,4 +1,16 @@
 """
+@file shadow_gap_detector.py
+@description Shadow Gap Detector for the AfriFlow Data Shadow model.
+             Detects data shadow gaps for CIB clients by comparing CIB
+             activity levels against expected cross-domain signals. For each
+             CIB activity record that exceeds a domain-specific threshold,
+             the detector checks whether the expected downstream signal is
+             present (e.g. an FX hedge for a cross-border payment). Absent
+             signals produce ShadowGap records scored 0–1, classified by
+             severity (INFO → CRITICAL), and tagged with recommended RM actions.
+@author Thabo Kunene
+@created 2026-03-18
+
 Data Shadow - Shadow Gap Detector
 
 A "data shadow" is the absence of expected data — treated
@@ -24,14 +36,15 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Dict, List, Optional, Any
-from enum import Enum
+from dataclasses import dataclass, field  # structured gap and expectation value objects
+from datetime import datetime             # gap detection timestamps and ID components
+from typing import Dict, List, Optional, Any  # full type annotations
+from enum import Enum                    # typed domain and severity enumerations
 
-from afriflow.exceptions import ConfigurationError
-from afriflow.logging_config import get_logger, log_operation
+from afriflow.exceptions import ConfigurationError  # raised on invalid configuration inputs
+from afriflow.logging_config import get_logger, log_operation  # structured operation logging
 
+# Module-level logger — log operation start/complete for every detect_gaps() call
 logger = get_logger("integration.data_shadow.shadow_gap_detector")
 
 
@@ -154,6 +167,19 @@ EXPECTATION_RULES: List[ShadowExpectation] = [
 
 
 def _score_to_severity(score: float) -> GapSeverity:
+    """
+    Map a numeric gap score (0–1) to a GapSeverity enum value.
+
+    Score bands:
+      ≥ 0.85  → CRITICAL   (immediate RM follow-up required)
+      ≥ 0.65  → HIGH       (same-week follow-up)
+      ≥ 0.45  → MEDIUM     (review in next pipeline cycle)
+      ≥ 0.25  → LOW        (log for tracking, no action yet)
+      < 0.25  → INFO       (informational only)
+
+    :param score: Gap score in [0.0, 1.0]
+    :return: Corresponding GapSeverity value
+    """
     if score >= 0.85:
         return GapSeverity.CRITICAL
     elif score >= 0.65:
@@ -307,12 +333,32 @@ class ShadowGapDetector:
         activity: Dict[str, Any],
         amount_usd: float,
     ) -> ShadowGap:
-        """Create a ShadowGap record."""
+        """
+        Create a ShadowGap record for a detected absence.
+
+        Gap score formula:
+          amount_factor = min(1.0, amount_usd / (threshold × 10))
+          gap_score     = rule.weight × (0.5 + 0.5 × amount_factor)
+
+        This means:
+          - At exactly the threshold, amount_factor ≈ 0.1, score ≈ weight × 0.55
+          - At 10× the threshold, amount_factor = 1.0, score = rule.weight
+          - Scores are bounded by rule.weight (max 1.0 if weight = 1.0)
+
+        :param client_golden_id: Client identifier for the gap record
+        :param country: Country where the absence was detected
+        :param rule: The ShadowExpectation rule that was not satisfied
+        :param activity: The CIB activity dict that triggered the rule check
+        :param amount_usd: USD amount of the triggering activity
+        :return: Populated ShadowGap record
+        """
         self._gap_counter += 1
         gap_id = f"GAP-{client_golden_id}-{self._gap_counter:04d}"
 
-        # Score: larger amount + higher weight = higher score
+        # Compute amount factor: how many times the threshold was exceeded.
+        # Capped at 1.0 so very large amounts do not push score above rule.weight.
         amount_factor = min(1.0, amount_usd / (rule.threshold_usd * 10))
+        # Base score is 0.5 × weight; each doubling of the threshold adds to score
         gap_score = round(rule.weight * (0.5 + 0.5 * amount_factor), 3)
         severity = _score_to_severity(gap_score)
 

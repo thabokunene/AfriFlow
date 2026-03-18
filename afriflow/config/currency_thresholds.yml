@@ -1,3 +1,7 @@
+# @file currency_thresholds.yml
+# @description Currency event detection thresholds for FX volatility monitoring
+# @author Thabo Kunene
+# @created 2026-03-17
 # config/currency_thresholds.yml
 
 # Currency event detection thresholds.
@@ -6,17 +10,19 @@
 # DISCLAIMER: This project is not sanctioned by, affiliated with, or
 # endorsed by Standard Bank Group, MTN Group, or any of their subsidiaries.
 
+# Currency-specific thresholds account for historical volatility and market conditions
+# Lower thresholds for unstable currencies, higher for stable/pegged currencies
 thresholds:
   NGN:
-    devaluation_pct: 8.0
-    rapid_depreciation_pct: 4.0
-    parallel_divergence_pct: 15.0
+    devaluation_pct: 8.0      # 8% threshold - tight due to frequent devaluations
+    rapid_depreciation_pct: 4.0  # 4% monthly depreciation triggers alert
+    parallel_divergence_pct: 15.0  # 15% gap between official/parallel rates
     notes: "Nigeria. High volatility. Multiple devaluation episodes 2022 to 2024."
 
   ZAR:
-    devaluation_pct: 12.0
-    rapid_depreciation_pct: 6.0
-    parallel_divergence_pct: 25.0
+    devaluation_pct: 12.0     # 12% threshold - higher due to ZAR stability
+    rapid_depreciation_pct: 6.0  # 6% monthly depreciation triggers alert
+    parallel_divergence_pct: 25.0  # 25% gap - deep liquid market
     notes: "South Africa. Relatively liquid. Higher thresholds."
 
   KES:
@@ -50,9 +56,9 @@ thresholds:
     notes: "Mozambique. Moderate volatility. Gas export potential."
 
   XOF:
-    devaluation_pct: 15.0
-    rapid_depreciation_pct: 8.0
-    parallel_divergence_pct: 25.0
+    devaluation_pct: 15.0     # 15% threshold - highest due to EUR peg stability
+    rapid_depreciation_pct: 8.0  # 8% monthly depreciation triggers alert
+    parallel_divergence_pct: 25.0  # 25% gap - very stable pegged currency
     notes: "CFA franc. Pegged to EUR. Very stable. High thresholds."
 
   TZS:

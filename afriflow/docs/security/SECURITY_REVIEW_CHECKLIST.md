@@ -1,3 +1,9 @@
+<!--
+@file SECURITY_REVIEW_CHECKLIST.md
+@description Reviewer checklist for processor modules across access, validation, logging
+@author Thabo Kunene
+@created 2026-03-17
+-->
 # Security Review Checklist for Processor Modules
 
 Use this checklist when reviewing any Processor that implements `BaseProcessor`.

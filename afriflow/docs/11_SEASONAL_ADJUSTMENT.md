@@ -1,4 +1,10 @@
-﻿# 11 Seasonal Adjustment
+<!--
+@file 11_SEASONAL_ADJUSTMENT.md
+@description Seasonal adjustment methodology to avoid false signals from cyclical behavior
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 11 Seasonal Adjustment
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

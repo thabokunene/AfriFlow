@@ -1,0 +1,510 @@
+# =============================================================================
+# @file schema.yml
+# @description dbt schema definitions, column documentation, and data tests
+#     for all four Unified Golden Record mart models: mart_unified_client,
+#     mart_group_revenue_360, mart_cross_sell_matrix, and mart_risk_heatmap.
+#     Enforces not_null and unique constraints on primary keys, and documents
+#     every column's business meaning for the dbt docs site.
+# @author Thabo Kunene
+# @created 2026-03-18
+# =============================================================================
+
+version: 2
+
+models:
+
+  # ── mart_unified_client ─────────────────────────────────────────────────────
+  # The crown-jewel golden record: one row per active client, combining metrics
+  # from all five AfriFlow domains into a single queryable entity.
+  - name: mart_unified_client
+    description: >
+      Unified Client 360 golden record combining every client's relationship
+      across CIB, Forex, Insurance, Cell Network, and PBB. Powers RM dashboards,
+      cross-sell opportunity identification, risk heatmaps, and revenue attribution.
+      Freshness SLA: sub-5-minute.
+    columns:
+
+      # ── Identity ──────────────────────────────────────────────────────────
+      - name: golden_id
+        description: >
+          Globally unique golden record identifier assigned by the entity
+          resolution layer. Format: GLD-{UUID}. Primary key for all downstream
+          joins in the AfriFlow mart layer.
+        tests:
+          - unique           # Each entity resolution output must be distinct
+          - not_null         # Every record must have a golden ID
+
+      - name: canonical_name
+        description: >
+          The authoritative entity name chosen by the entity resolution algorithm
+          as the most reliable representation across all domain sources.
+        tests:
+          - not_null
+
+      - name: home_country
+        description: ISO-2 country code of the client's primary domicile (e.g. ZA, NG, KE).
+        tests:
+          - not_null
+
+      - name: client_tier
+        description: >
+          CIB client tier classification: Platinum, Gold, Silver, or Emerging.
+          Drives RM assignment and service-level expectations.
+
+      - name: relationship_manager
+        description: >
+          Full name or employee ID of the assigned relationship manager.
+          Used to partition RM briefing generation and portfolio views.
+
+      # ── Domain presence flags ─────────────────────────────────────────────
+      - name: has_cib
+        description: TRUE when the client has at least one CIB payment flow record.
+
+      - name: has_forex
+        description: TRUE when the client has at least one FX trade position record.
+
+      - name: has_insurance
+        description: TRUE when the client has at least one active insurance policy.
+
+      - name: has_cell
+        description: TRUE when the client has at least one active MTN SIM record.
+
+      - name: has_pbb
+        description: TRUE when the client has at least one PBB payroll account.
+
+      - name: domains_active
+        description: >
+          Count of active domains (0–5). A client with all 5 domains is fully
+          captured. Used as the primary input for cross-sell scoring.
+        tests:
+          - not_null
+
+      # ── CIB metrics ───────────────────────────────────────────────────────
+      - name: cib_active_corridors
+        description: Number of distinct payment corridors (country-pair routes) active in the period.
+
+      - name: cib_annual_value
+        description: Total CIB payment value (ZAR) over the trailing 12 months.
+
+      - name: cib_payment_count_90d
+        description: Number of CIB payments in the trailing 90 days. Used for attrition scoring.
+
+      - name: cib_estimated_revenue
+        description: Estimated CIB fee income (ZAR) over the trailing 12 months.
+
+      - name: cib_health_status
+        description: >
+          CIB activity classification: 'inactive' (0 payments), 'low' (<10),
+          'medium' (10–49), 'high' (50+). Used in RM briefing health indicators.
+
+      # ── Forex metrics ─────────────────────────────────────────────────────
+      - name: forex_currencies_traded
+        description: Count of distinct currencies traded in the period.
+
+      - name: forex_annual_volume
+        description: Total FX trade volume (ZAR) over the trailing 12 months.
+
+      - name: forex_unhedged_value
+        description: >
+          Total unhedged FX exposure value (ZAR). Values above R1M trigger
+          the primary_risk_signal = 'fx_exposure' flag.
+
+      - name: forex_hedge_ratio_pct
+        description: >
+          Average hedge ratio as a percentage (0–100). Values >= 80% are
+          classified as adequately hedged (forex_is_adequately_hedged = TRUE).
+
+      - name: forex_is_adequately_hedged
+        description: TRUE when the average hedge ratio is 80% or above.
+
+      # ── Insurance metrics ─────────────────────────────────────────────────
+      - name: insurance_active_policies
+        description: Number of active insurance policies across all product lines.
+
+      - name: insurance_annual_premium
+        description: Total insurance premium (ZAR) annualised across all active policies.
+
+      - name: insurance_coverage_gaps
+        description: >
+          Count of policies with identified coverage gaps (sum insured < exposure value).
+          Any value > 0 triggers the insurance_gap risk signal.
+
+      - name: insurance_coverage_gap_value
+        description: Total value (ZAR) of identified coverage gaps across all policies.
+
+      - name: insurance_lapsing_90d
+        description: >
+          Count of policies at risk of lapsing within the next 90 days.
+          Used in the NBA engine to prioritise renewal conversations.
+
+      # ── Cell metrics ──────────────────────────────────────────────────────
+      - name: cell_total_sims
+        description: Total active MTN SIM cards associated with this client.
+
+      - name: cell_estimated_employees
+        description: >
+          SIM-deflated employee headcount estimate using country-level
+          multi-SIM penetration factors from deflation_model.py.
+
+      - name: cell_sim_growth_pct
+        description: >
+          Month-on-month SIM base growth percentage. Negative values indicate
+          workforce contraction and trigger the 'client_attrition' risk signal.
+
+      - name: cell_is_expanding
+        description: TRUE when cell_sim_growth_pct > 5% (workforce growing materially).
+
+      - name: cell_momo_monthly_value
+        description: Total MoMo (Mobile Money) transaction value (ZAR) in the last month.
+
+      # ── PBB metrics ───────────────────────────────────────────────────────
+      - name: pbb_total_employees
+        description: Total employees with PBB payroll accounts under this corporate relationship.
+
+      - name: pbb_monthly_payroll
+        description: Total gross payroll (ZAR) processed through PBB in the last month.
+
+      - name: pbb_digital_adoption_pct
+        description: Percentage of PBB employees using digital banking channels.
+
+      - name: pbb_dormant_pct
+        description: >
+          Percentage of PBB accounts that are dormant (no transactions in 90 days).
+          Values above 30% trigger the 'dormant_accounts' risk signal.
+
+      # ── Derived fields ────────────────────────────────────────────────────
+      - name: total_relationship_value_zar
+        description: >
+          Composite relationship value (ZAR) = CIB annual value + forex annual volume
+          + insurance annual premium + CIB estimated revenue + forex estimated revenue.
+
+      - name: cross_sell_score
+        description: >
+          Score 0–95 inversely proportional to active domains. Higher scores
+          indicate more cross-sell opportunity. Drives NBA prioritisation.
+
+      - name: cross_sell_priority
+        description: 'high' / 'medium' / 'low' based on domains_active and total relationship value.
+
+      - name: primary_risk_signal
+        description: >
+          The single highest-priority risk flag for this client:
+          'fx_exposure', 'insurance_gap', 'client_attrition', 'dormant_accounts', or 'none'.
+
+      - name: risk_score
+        description: >
+          Additive risk score (0–100) combining FX, insurance gap, attrition, and
+          concentration sub-scores. Used by the risk heatmap mart.
+
+      - name: cell_pbb_capture_ratio
+        description: >
+          Ratio of cell_estimated_employees to pbb_total_employees. Values < 1.0
+          indicate that not all MTN-registered employees have PBB accounts.
+
+      - name: uncaptured_employees
+        description: >
+          Number of employees visible in cell data but not yet in PBB payroll.
+          The primary driver of the PBB payroll NBA recommendation.
+
+      - name: shadow_health_score
+        description: >
+          Data shadow health score (0–100): 100 when all 5 domains are present,
+          decreasing by 20 points per missing domain. Used in client briefing.
+
+      - name: days_since_any_activity
+        description: >
+          Calendar days since the most recent transaction/activity on any domain.
+          NULL when the client has never had activity. Used in attrition scoring.
+
+      - name: data_classification
+        description: Regulatory classification — always 'POPIA_RESTRICTED' for all records.
+
+      - name: snapshot_date
+        description: dbt run date when this record was last refreshed.
+
+
+  # ── mart_group_revenue_360 ──────────────────────────────────────────────────
+  # Comprehensive revenue view per client enabling total relationship value,
+  # trend analysis, concentration measurement, CLV estimation, and ranking.
+  - name: mart_group_revenue_360
+    description: >
+      Comprehensive revenue view per client across all five domains.
+      Enables total relationship value calculation, revenue trend analysis
+      (QoQ, YoY), HHI concentration measurement, client lifetime value
+      estimation, and revenue ranking by tier and country.
+    columns:
+
+      - name: golden_id
+        description: Golden record identifier — foreign key to mart_unified_client.
+        tests:
+          - unique
+          - not_null
+
+      - name: cib_revenue_annual
+        description: Annualised CIB fee income (ZAR) = 90-day revenue × 4.
+
+      - name: forex_revenue_annual
+        description: Annualised FX revenue (ZAR) = 90-day FX revenue × 4.
+
+      - name: insurance_revenue_annual
+        description: Annual insurance premium revenue (ZAR) from active policies.
+
+      - name: cell_revenue_annual
+        description: Annualised cell/MoMo revenue (ZAR) estimated from usage data.
+
+      - name: pbb_revenue_annual
+        description: Annualised PBB account revenue (ZAR) from payroll and account fees.
+
+      - name: total_revenue_annual
+        description: Sum of all five domain annual revenue streams (ZAR).
+
+      - name: total_revenue_90d
+        description: Sum of all five domain 90-day revenue streams (ZAR).
+
+      - name: primary_revenue_domain
+        description: >
+          The domain contributing the largest share of annual revenue:
+          'cib', 'forex', 'insurance', 'cell', or 'pbb'.
+
+      - name: primary_domain_pct
+        description: >
+          Percentage of total_revenue_annual contributed by primary_revenue_domain.
+          Used as a concentration indicator alongside revenue_hhi.
+
+      - name: revenue_hhi
+        description: >
+          Herfindahl-Hirschman Index (0–10000) measuring revenue concentration.
+          10000 = all revenue from one domain; ~2000 = equal five-way split.
+
+      - name: estimated_clv_5yr_zar
+        description: >
+          5-year client lifetime value estimate (ZAR) = total_revenue_annual × 3.791.
+          The 3.791 factor is the present-value annuity factor at 10% discount rate.
+
+      - name: churn_probability_12m
+        description: >
+          Estimated probability (%) of client churn within 12 months based on
+          domains_active. Single-domain = 35%; five-domain = 2%.
+
+      - name: revenue_rank_overall
+        description: Client rank by total_revenue_annual across the entire portfolio.
+
+      - name: revenue_rank_in_tier
+        description: Client rank by total_revenue_annual within their client_tier.
+
+      - name: revenue_rank_in_country
+        description: Client rank by total_revenue_annual within their home_country.
+
+      - name: snapshot_date
+        description: dbt run date when this record was last refreshed.
+
+
+  # ── mart_cross_sell_matrix ──────────────────────────────────────────────────
+  # Product holdings matrix and Next Best Action recommendations.
+  # One row per client with 13 product boolean flags and the top-3 NBA products.
+  - name: mart_cross_sell_matrix
+    description: >
+      Product holdings matrix identifying which of the 13 available AfriFlow
+      products each client holds. Surfaces gap categories and generates the
+      top-3 Next Best Action product recommendations with estimated revenue
+      value and confidence scores for RM-led outreach.
+    columns:
+
+      - name: golden_id
+        description: Golden record identifier — foreign key to mart_unified_client.
+        tests:
+          - unique
+          - not_null
+
+      # ── Product holding flags ─────────────────────────────────────────────
+      - name: has_cib_payments
+        description: TRUE when the client has active CIB payment flows.
+
+      - name: has_cib_trade_finance
+        description: TRUE when the client has CIB trade finance corridors.
+
+      - name: has_cib_cash_management
+        description: TRUE when the client has a CIB cash management facility.
+
+      - name: has_forex_spot
+        description: TRUE when the client has traded FX spot in the period.
+
+      - name: has_forex_forwards
+        description: TRUE when the client has active FX forward contracts.
+
+      - name: has_forex_options
+        description: TRUE when the client has FX option positions (call or put).
+
+      - name: has_insurance_asset
+        description: TRUE when the client holds asset, property, or marine insurance.
+
+      - name: has_insurance_credit
+        description: TRUE when the client holds credit, surety, or guarantee insurance.
+
+      - name: has_insurance_liability
+        description: TRUE when the client holds liability, directors, or professional insurance.
+
+      - name: has_cell_corporate_sim
+        description: TRUE when the client has active MTN corporate SIM accounts.
+
+      - name: has_cell_momo
+        description: TRUE when the client has active MoMo transaction activity.
+
+      - name: has_pbb_payroll
+        description: TRUE when the client has a PBB payroll banking relationship.
+
+      - name: has_pbb_employee_banking
+        description: TRUE when the client has employees using PBB digital banking.
+
+      # ── Product penetration ───────────────────────────────────────────────
+      - name: total_products_held
+        description: Count of the 13 products the client currently holds (0–13).
+
+      - name: total_products_available
+        description: Total products in the AfriFlow universe (constant = 13).
+
+      - name: product_penetration_pct
+        description: Percentage of the 13-product universe the client uses (0–100).
+
+      # ── Gap identification ────────────────────────────────────────────────
+      - name: gap_fx_hedging
+        description: TRUE when the client has unhedged FX exposure but no forward contracts.
+
+      - name: gap_fx_hedging_value
+        description: Total unhedged FX value (ZAR) driving the gap_fx_hedging flag.
+
+      - name: gap_insurance_coverage
+        description: TRUE when the client has no asset and no credit insurance product.
+
+      - name: gap_employee_banking
+        description: >
+          TRUE when cell data shows more employees than PBB payroll accounts,
+          indicating untapped workforce banking opportunity.
+
+      - name: gap_employee_count
+        description: Number of employees visible in cell data but absent from PBB payroll.
+
+      - name: gap_trade_finance
+        description: TRUE when the client has no CIB trade finance product.
+
+      - name: gap_cash_management
+        description: TRUE when the client has no CIB cash management facility.
+
+      # ── Next Best Action ──────────────────────────────────────────────────
+      - name: nba_product_1
+        description: >
+          The highest-priority product recommendation for the next RM conversation.
+          Prioritised by: FX hedge > payroll > insurance > trade finance > cash management.
+
+      - name: nba_product_1_value
+        description: Estimated annual revenue (ZAR) if nba_product_1 is successfully cross-sold.
+
+      - name: nba_product_1_confidence
+        description: Model confidence (0–1) in the nba_product_1 recommendation.
+
+      - name: nba_product_2
+        description: Second-highest-priority product recommendation.
+
+      - name: nba_product_2_value
+        description: Estimated annual revenue (ZAR) if nba_product_2 is successfully cross-sold.
+
+      - name: nba_product_3
+        description: Third-highest-priority product recommendation.
+
+      - name: nba_product_3_value
+        description: Estimated annual revenue (ZAR) if nba_product_3 is successfully cross-sold.
+
+      - name: total_opportunity_zar
+        description: Sum of nba_product_1_value + nba_product_2_value + nba_product_3_value (ZAR).
+
+      - name: cross_sell_priority
+        description: >
+          'critical' / 'high' / 'medium' / 'low' based on products held and
+          relationship value. Sequences RM campaign outreach.
+
+      - name: snapshot_date
+        description: dbt run date when this record was last refreshed.
+
+
+  # ── mart_risk_heatmap ───────────────────────────────────────────────────────
+  # Comprehensive risk assessment per client. Only includes clients with at
+  # least one active risk signal (composite_risk_score > 0).
+  - name: mart_risk_heatmap
+    description: >
+      Comprehensive risk heatmap per client combining attrition risk (inactivity,
+      CIB volume decline, SIM base contraction), FX exposure risk, insurance
+      coverage gap risk, and concentration risk into a single composite score.
+      Only clients with at least one active risk signal are included.
+      Powers risk dashboards and early warning systems.
+    columns:
+
+      - name: golden_id
+        description: Golden record identifier — foreign key to mart_unified_client.
+        tests:
+          - not_null
+
+      # ── Attrition risk ────────────────────────────────────────────────────
+      - name: attrition_risk_score
+        description: >
+          Composite risk score (0–100) weighted across all four dimensions:
+          attrition 30%, FX 25%, insurance 25%, concentration 20%.
+
+      - name: attrition_risk_level
+        description: Risk level classification derived from attrition_risk_score.
+
+      - name: attrition_signals
+        description: >
+          Semicolon-delimited string listing which attrition sub-signals are active:
+          'Client inactivity', 'CIB volume decline', 'SIM base contraction'.
+
+      - name: cib_volume_trend
+        description: >
+          CIB payment activity trend: 'declining' (0 payments), 'low' (<10),
+          or 'stable' (10+). Derived from cib_payment_count_90d.
+
+      # ── FX exposure risk ──────────────────────────────────────────────────
+      - name: total_unhedged_zar
+        description: Total unhedged FX exposure value (ZAR) across all positions.
+
+      - name: unhedged_currencies
+        description: Comma-separated list of currencies with unhedged exposure.
+
+      - name: highest_exposure_currency
+        description: The currency with the single largest unhedged trade value.
+
+      - name: parallel_market_exposure
+        description: TRUE when the client has any parallel market FX activity flagged.
+
+      # ── Insurance risk ────────────────────────────────────────────────────
+      - name: total_coverage_gap_zar
+        description: Total value (ZAR) of insurance coverage gaps across all policies.
+
+      - name: uncovered_countries
+        description: Comma-separated list of countries where coverage gaps exist.
+
+      - name: lapsing_policies_count
+        description: Number of policies at risk of lapsing within the next 90 days.
+
+      # ── Composite risk ────────────────────────────────────────────────────
+      - name: composite_risk_score
+        description: >
+          Weighted composite risk score (0–100) combining all four dimensions.
+          Weights: attrition 30%, FX 25%, insurance 25%, concentration 20%.
+
+      - name: risk_level
+        description: >
+          Risk classification: 'critical' (>=60), 'high' (>=40), 'medium' (>=20),
+          'low' (<20). Drives dashboard colour coding and alert routing.
+
+      - name: primary_risk_type
+        description: >
+          The dominant risk dimension: 'attrition', 'fx_exposure',
+          'insurance_gap', or 'concentration'. Drives recommended_action phrasing.
+
+      - name: recommended_action
+        description: >
+          Plain-language RM action recommendation derived from the primary risk type
+          and score, e.g. 'Urgent RM engagement - schedule client meeting'.
+
+      - name: snapshot_date
+        description: dbt run date when this record was last refreshed.

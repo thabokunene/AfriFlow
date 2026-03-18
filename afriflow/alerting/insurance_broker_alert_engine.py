@@ -1,56 +1,106 @@
 """
-Insurance Broker Alert Engine
-
-Generates alerts for insurance brokers covering:
-
-  RENEWAL_DUE     — Policy expiry within 60/30/14/7 days
-  COVERAGE_GAP    — Client's CIB corridor or workforce not covered
-  CLAIM_SURGE     — Claim frequency spike suggests systemic issue
-  UNDERINSURANCE  — Sum assured < 60% of estimated asset value
-  FREE_LOOK_END   — Free-look period ending; client may cancel
-
-Disclaimer: Portfolio project by Thabo Kunene. Not a
-Standard Bank Group product. All data is simulated.
+@file insurance_broker_alert_engine.py
+@description Generates insurance broker alerts by analysing client insurance
+             profiles alongside CIB trade corridor and facility data. Covers
+             five alert types: policy renewal due dates, free-look period endings,
+             coverage gaps in active trade corridors, underinsurance relative to
+             CIB credit exposure, and claim frequency surges that may indicate
+             systemic risk or fraud.
+@author Thabo Kunene
+@created 2026-03-18
 """
 
-from __future__ import annotations
+# Insurance Broker Alert Engine
+#
+# Generates alerts for insurance brokers covering:
+#
+#   RENEWAL_DUE     — Policy expiry within 60/30/14/7 days
+#   COVERAGE_GAP    — Client's CIB corridor or workforce not covered
+#   CLAIM_SURGE     — Claim frequency spike suggests systemic issue
+#   UNDERINSURANCE  — Sum assured < 60% of estimated asset value
+#   FREE_LOOK_END   — Free-look period ending; client may cancel
+#
+# Disclaimer: Portfolio project by Thabo Kunene. Not a
+# Standard Bank Group product. All data is simulated.
 
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from __future__ import annotations  # Enables forward references in annotations
 
+from dataclasses import dataclass, field  # Structured data containers with defaults
+from datetime import datetime, timedelta  # Alert timestamps and SLA calculations
+from typing import Dict, List, Optional   # Type annotations for safety and IDE support
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
 
 @dataclass
 class InsuranceBrokerAlert:
+    """A single insurance broker alert.
+
+    :param alert_id: Unique ID with prefix INS-<TYPE>-<CLIENT>[-<POLICY>]
+    :param broker_id: ID of the insurance broker who manages this client
+    :param client_golden_id: Unified client ID from entity resolution layer
+    :param client_name: Human-readable name for broker dashboard display
+    :param alert_type: RENEWAL_DUE / COVERAGE_GAP / CLAIM_SURGE /
+                       UNDERINSURANCE / FREE_LOOK_END
+    :param urgency: IMMEDIATE / HIGH / MEDIUM / LOW — drives sort and delivery priority
+    :param policy_id: Policy identifier, or None for client-level alerts (e.g. COVERAGE_GAP)
+    :param headline: One-line alert title
+    :param details: Full alert context for broker preparation
+    :param recommended_action: Specific next step the broker should take
+    :param estimated_premium_zar: Estimated annual premium value at risk or opportunity size
+    :param created_at: ISO timestamp of alert generation
+    """
+
     alert_id: str
     broker_id: str
     client_golden_id: str
     client_name: str
     alert_type: str
     urgency: str
-    policy_id: Optional[str]
+    policy_id: Optional[str]           # None for alerts not tied to a specific policy
     headline: str
     details: str
     recommended_action: str
-    estimated_premium_zar: float
+    estimated_premium_zar: float       # Renewal value, gap opportunity, or uplift estimate
     created_at: str = field(
-        default_factory=lambda: datetime.now().isoformat()
+        default_factory=lambda: datetime.now().isoformat()  # Auto-stamped at creation
     )
 
 
 @dataclass
 class InsuranceBrokerAlertBatch:
+    """Batch of all insurance broker alerts for a broker's client portfolio.
+
+    :param broker_id: ID of the broker this batch belongs to
+    :param alerts: Priority-sorted list of InsuranceBrokerAlert objects
+    :param total_premium_at_risk_zar: Sum of estimated_premium_zar across all alerts
+    :param generated_at: ISO timestamp when the batch was generated
+    """
+
     broker_id: str
     alerts: List[InsuranceBrokerAlert]
-    total_premium_at_risk_zar: float
+    total_premium_at_risk_zar: float   # KPI: total premium revenue in the broker's action queue
     generated_at: str = field(
         default_factory=lambda: datetime.now().isoformat()
     )
 
 
+# ---------------------------------------------------------------------------
+# Alert engine
+# ---------------------------------------------------------------------------
+
 class InsuranceBrokerAlertEngine:
     """
     Generate insurance broker alerts from insurance and CIB profiles.
+
+    For each client in the broker's portfolio, the engine runs five
+    detection algorithms: renewal due, free-look ending, coverage gap,
+    underinsurance, and claim surge. Results are sorted by urgency and
+    returned as a single InsuranceBrokerAlertBatch.
+
+    Intended recipient: insurance brokers covering commercial clients.
 
     Usage::
 
@@ -68,6 +118,8 @@ class InsuranceBrokerAlertEngine:
         )
     """
 
+    # Renewal alert thresholds: alerts fire at each of these day counts before expiry.
+    # Multiple thresholds ensure early warnings (60 days) escalate to urgent (7 days).
     _RENEWAL_THRESHOLDS = [7, 14, 30, 60]   # days before expiry
 
     def build_batch(
@@ -75,17 +127,32 @@ class InsuranceBrokerAlertEngine:
         broker_id: str,
         client_portfolio: List[Dict],
     ) -> InsuranceBrokerAlertBatch:
+        """
+        Build a sorted alert batch for a single insurance broker.
+
+        Iterates over every client in the portfolio, runs all detectors,
+        sorts the combined alerts by urgency, and sums up premium-at-risk.
+
+        :param broker_id: ID of the insurance broker
+        :param client_portfolio: List of client dicts with 'insurance_profile'
+                                 and 'cib_profile' sub-objects
+        :return: InsuranceBrokerAlertBatch sorted IMMEDIATE → LOW
+        """
         alerts: List[InsuranceBrokerAlert] = []
 
+        # Run all five detectors for every client in the broker's book
         for client in client_portfolio:
             alerts.extend(self._process_client(broker_id, client))
 
+        # Sort by urgency so the broker's most time-sensitive actions appear first.
+        # IMMEDIATE=0, HIGH=1, MEDIUM=2, LOW=3; unknown urgencies are deprioritised.
         alerts.sort(
             key=lambda a: {"IMMEDIATE": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}.get(
                 a.urgency, 9
             )
         )
 
+        # KPI: total premium represented in the broker's current action queue
         total_at_risk = sum(a.estimated_premium_zar for a in alerts)
 
         return InsuranceBrokerAlertBatch(
@@ -97,16 +164,29 @@ class InsuranceBrokerAlertEngine:
     def _process_client(
         self, broker_id: str, client: Dict
     ) -> List[InsuranceBrokerAlert]:
+        """
+        Run all alert detectors for a single client and return any alerts generated.
+
+        :param broker_id: ID of the insurance broker
+        :param client: Client dict with 'golden_id', 'client_name',
+                       'insurance_profile', and 'cib_profile' keys
+        :return: List of InsuranceBrokerAlert objects (may be empty)
+        """
         alerts: List[InsuranceBrokerAlert] = []
+
+        # Extract standard client identifiers
         golden_id = client.get("golden_id", "UNK")
         client_name = client.get("client_name", "Unknown")
-        ins = client.get("insurance_profile", {})
-        cib = client.get("cib_profile", {})
+        ins = client.get("insurance_profile", {})   # Insurance data: policies, claims, coverage
+        cib = client.get("cib_profile", {})          # CIB data: corridors, facility value, trade
 
+        # A client with no insurance profile has no actionable insurance alerts
         if not ins:
             return []
 
-        # --- Renewal due ---
+        # --- Detector 1: Renewal due ---
+        # Check each individual policy for upcoming expiry within 60 days.
+        # Runs per-policy because a client may hold multiple policies with different expiries.
         for policy in ins.get("policies", []):
             alert = self._renewal_alert(
                 broker_id, golden_id, client_name, policy
@@ -114,28 +194,36 @@ class InsuranceBrokerAlertEngine:
             if alert:
                 alerts.append(alert)
 
-            # --- Free-look ending ---
+            # --- Detector 2: Free-look ending ---
+            # Newly issued policies have a free-look period during which the
+            # client may cancel without penalty. Ends within 7 days = HIGH urgency.
             alert = self._free_look_alert(
                 broker_id, golden_id, client_name, policy
             )
             if alert:
                 alerts.append(alert)
 
-        # --- Coverage gap ---
+        # --- Detector 3: Coverage gap ---
+        # Compares the set of CIB trade corridors against insured countries.
+        # A gap means the client has active cross-border exposure with no coverage.
         gap_alert = self._coverage_gap_alert(
             broker_id, golden_id, client_name, ins, cib
         )
         if gap_alert:
             alerts.append(gap_alert)
 
-        # --- Underinsurance ---
+        # --- Detector 4: Underinsurance ---
+        # Compares total sum assured against CIB facility value.
+        # Triggers when sum assured < 60% of facility value — a material gap.
         under_alert = self._underinsurance_alert(
             broker_id, golden_id, client_name, ins, cib
         )
         if under_alert:
             alerts.append(under_alert)
 
-        # --- Claim surge ---
+        # --- Detector 5: Claim surge ---
+        # Compares recent 90-day claim count against the baseline average.
+        # A 2× surge may indicate systemic risk, catastrophic event, or fraud.
         claim_alert = self._claim_surge_alert(
             broker_id, golden_id, client_name, ins
         )
@@ -144,6 +232,10 @@ class InsuranceBrokerAlertEngine:
 
         return alerts
 
+    # ------------------------------------------------------------------
+    # Individual detectors
+    # ------------------------------------------------------------------
+
     def _renewal_alert(
         self,
         broker_id: str,
@@ -151,25 +243,43 @@ class InsuranceBrokerAlertEngine:
         client_name: str,
         policy: Dict,
     ) -> Optional[InsuranceBrokerAlert]:
+        """
+        Generate a renewal due alert if the policy expires within 60 days.
+
+        Urgency escalates as expiry approaches:
+          60 days → LOW (early planning phase)
+          30 days → MEDIUM (quote preparation required)
+          14 days → HIGH (renewal urgent)
+           7 days → IMMEDIATE (lapse risk if not renewed today)
+
+        :param broker_id: Broker identifier
+        :param golden_id: Client golden ID
+        :param client_name: Client name for display
+        :param policy: Policy dict with 'expiry_date', 'policy_id',
+                       'policy_type', 'annual_premium_zar'
+        :return: InsuranceBrokerAlert or None if expiry is >60 days away or already lapsed
+        """
         expiry_str = policy.get("expiry_date")
         if not expiry_str:
-            return None
+            return None  # Cannot compute days left without an expiry date
 
         try:
             from datetime import date
-            expiry = date.fromisoformat(expiry_str)
-            days_left = (expiry - date.today()).days
+            expiry = date.fromisoformat(expiry_str)   # Parse ISO date string
+            days_left = (expiry - date.today()).days   # Positive = future, negative = lapsed
         except (ValueError, TypeError):
-            return None
+            return None  # Malformed date string; skip rather than raise
 
+        # Only alert within the 60-day window; don't alert on already-lapsed policies
         if days_left > 60 or days_left < 0:
             return None
 
+        # Urgency escalation: the closer to expiry, the more urgent the alert
         urgency = (
-            "IMMEDIATE" if days_left <= 7
-            else "HIGH" if days_left <= 14
-            else "MEDIUM" if days_left <= 30
-            else "LOW"
+            "IMMEDIATE" if days_left <= 7   # 7 days: imminent lapse
+            else "HIGH" if days_left <= 14  # 14 days: urgent renewal
+            else "MEDIUM" if days_left <= 30  # 30 days: prepare quote
+            else "LOW"                        # 60 days: plan ahead
         )
         premium = policy.get("annual_premium_zar", 0.0)
         policy_type = policy.get("policy_type", "policy")
@@ -183,6 +293,7 @@ class InsuranceBrokerAlertEngine:
             urgency=urgency,
             policy_id=policy.get("policy_id"),
             headline=(
+                # Convert 'trade_credit' → 'Trade Credit' for display
                 f"{policy_type.replace('_', ' ').title()} "
                 f"renewal due in {days_left} days"
             ),
@@ -194,7 +305,7 @@ class InsuranceBrokerAlertEngine:
                 f"Prepare renewal quote and send to client. "
                 f"Check if sum assured should be adjusted."
             ),
-            estimated_premium_zar=premium,
+            estimated_premium_zar=premium,  # Renewal premium represents revenue at risk
         )
 
     def _free_look_alert(
@@ -204,17 +315,31 @@ class InsuranceBrokerAlertEngine:
         client_name: str,
         policy: Dict,
     ) -> Optional[InsuranceBrokerAlert]:
+        """
+        Generate a free-look ending alert within 7 days of the free-look period end.
+
+        The free-look period (typically 31 days from policy inception) allows
+        new clients to cancel for a full refund. If the broker hasn't confirmed
+        satisfaction, there is cancellation risk. Urgency is always HIGH.
+
+        :param broker_id: Broker identifier
+        :param golden_id: Client golden ID
+        :param client_name: Client name
+        :param policy: Policy dict with 'free_look_end_date' and 'annual_premium_zar'
+        :return: InsuranceBrokerAlert or None
+        """
         free_look_end = policy.get("free_look_end_date")
         if not free_look_end:
-            return None
+            return None  # No free-look date means policy is past the free-look window
 
         try:
             from datetime import date
             end = date.fromisoformat(free_look_end)
             days_left = (end - date.today()).days
         except (ValueError, TypeError):
-            return None
+            return None  # Invalid date; skip silently
 
+        # Alert window: within 7 days of free-look end (not yet expired)
         if days_left > 7 or days_left < 0:
             return None
 
@@ -224,7 +349,7 @@ class InsuranceBrokerAlertEngine:
             client_golden_id=golden_id,
             client_name=client_name,
             alert_type="FREE_LOOK_END",
-            urgency="HIGH",
+            urgency="HIGH",  # Always HIGH: cancellation window is imminent
             policy_id=policy.get("policy_id"),
             headline=(
                 f"Free-look period ends in {days_left} days — "
@@ -250,15 +375,36 @@ class InsuranceBrokerAlertEngine:
         ins: Dict,
         cib: Dict,
     ) -> Optional[InsuranceBrokerAlert]:
-        covered = set(ins.get("covered_countries", []))
-        active_corridors = set(cib.get("active_payment_corridors", []))
+        """
+        Detect a coverage gap: active CIB trade corridors not covered by insurance.
+
+        Uses set difference to identify countries where the client trades (CIB data)
+        but has no insurance coverage. The estimated premium is based on 0.8% of the
+        annual cross-border corridor value — a typical trade credit insurance rate.
+
+        Urgency: MEDIUM (gap is a risk but not an immediate expiry situation)
+
+        :param broker_id: Broker identifier
+        :param golden_id: Client golden ID
+        :param client_name: Client name
+        :param ins: Insurance profile dict with 'covered_countries' list
+        :param cib: CIB profile dict with 'active_payment_corridors' list and
+                    'annual_cross_border_value_zar'
+        :return: InsuranceBrokerAlert or None if no gap exists
+        """
+        covered = set(ins.get("covered_countries", []))           # Countries with insurance
+        active_corridors = set(cib.get("active_payment_corridors", []))  # Countries with trade
+
+        # Set difference: countries where client trades but is not insured
         gaps = active_corridors - covered
 
         if not gaps:
-            return None
+            return None  # Full coverage; no alert needed
 
-        gap_countries = sorted(gaps)
+        gap_countries = sorted(gaps)   # Alphabetical for consistent display
         corridor_value = cib.get("annual_cross_border_value_zar", 0)
+
+        # Estimated new premium based on 0.8% trade credit insurance rate
         est_premium = corridor_value * 0.008
 
         return InsuranceBrokerAlert(
@@ -267,8 +413,8 @@ class InsuranceBrokerAlertEngine:
             client_golden_id=golden_id,
             client_name=client_name,
             alert_type="COVERAGE_GAP",
-            urgency="MEDIUM",
-            policy_id=None,
+            urgency="MEDIUM",  # Gap is a revenue opportunity, not an emergency
+            policy_id=None,    # Gap alert is client-level, not tied to a specific policy
             headline=(
                 f"Coverage gap: {len(gaps)} active corridors uninsured"
             ),
@@ -279,10 +425,11 @@ class InsuranceBrokerAlertEngine:
                 f"R{corridor_value:,.0f}/year."
             ),
             recommended_action=(
+                # Limit the displayed country list to 3 to keep the CTA concise
                 f"Prepare trade credit / marine cargo proposal "
                 f"for {', '.join(gap_countries[:3])}."
             ),
-            estimated_premium_zar=est_premium,
+            estimated_premium_zar=est_premium,  # New business opportunity value
         )
 
     def _underinsurance_alert(
@@ -293,16 +440,37 @@ class InsuranceBrokerAlertEngine:
         ins: Dict,
         cib: Dict,
     ) -> Optional[InsuranceBrokerAlert]:
+        """
+        Detect underinsurance: sum assured is less than 60% of CIB facility value.
+
+        The 60% threshold is the minimum coverage ratio considered adequate.
+        The recommended sum-assured uplift targets 80% of facility value (a
+        more conservative benchmark), leaving a 20% buffer for undrawn facilities.
+
+        Estimated additional premium uses the 0.8% trade credit insurance rate.
+
+        :param broker_id: Broker identifier
+        :param golden_id: Client golden ID
+        :param client_name: Client name
+        :param ins: Insurance profile with 'total_sum_assured_zar'
+        :param cib: CIB profile with 'total_facility_value_zar'
+        :return: InsuranceBrokerAlert or None if coverage ratio is adequate
+        """
         sum_assured = ins.get("total_sum_assured_zar", 0)
         facility_value = cib.get("total_facility_value_zar", 0)
 
+        # Cannot assess underinsurance without both values
         if not facility_value or not sum_assured:
             return None
 
+        # Coverage ratio: what fraction of the CIB facility is insured
         coverage_ratio = sum_assured / facility_value
+
+        # Below 60% coverage is considered materially underinsured
         if coverage_ratio >= 0.60:
             return None
 
+        # Shortfall to reach 80% coverage (the recommended adequate coverage level)
         shortfall = facility_value * 0.80 - sum_assured
 
         return InsuranceBrokerAlert(
@@ -311,8 +479,8 @@ class InsuranceBrokerAlertEngine:
             client_golden_id=golden_id,
             client_name=client_name,
             alert_type="UNDERINSURANCE",
-            urgency="HIGH",
-            policy_id=None,
+            urgency="HIGH",  # Underinsurance creates material credit and asset risk
+            policy_id=None,  # Client-level alert; not tied to one specific policy
             headline=(
                 f"Underinsured: {coverage_ratio*100:.0f}% coverage "
                 f"vs CIB exposure"
@@ -327,6 +495,7 @@ class InsuranceBrokerAlertEngine:
                 "Present comprehensive review with recommended "
                 "sum-assured uplift to match credit exposure."
             ),
+            # Premium opportunity: 0.8% on the shortfall amount
             estimated_premium_zar=shortfall * 0.008,
         )
 
@@ -337,13 +506,32 @@ class InsuranceBrokerAlertEngine:
         client_name: str,
         ins: Dict,
     ) -> Optional[InsuranceBrokerAlert]:
-        claims_90d = ins.get("claims_count_90d", 0)
-        avg_claims_90d = ins.get("avg_claims_90d_baseline", 1)
+        """
+        Detect a claim frequency surge: recent 90-day claim count exceeds
+        2× the historical baseline average.
 
+        Minimum claim count of 3 prevents alerts on isolated single incidents.
+        A surge ratio ≥ 2× indicates a systemic issue, catastrophic event,
+        or potential fraud ring that requires investigation.
+
+        :param broker_id: Broker identifier
+        :param golden_id: Client golden ID
+        :param client_name: Client name
+        :param ins: Insurance profile with 'claims_count_90d' and
+                    'avg_claims_90d_baseline' fields
+        :return: InsuranceBrokerAlert or None if no surge detected
+        """
+        claims_90d = ins.get("claims_count_90d", 0)         # Recent claim count
+        avg_claims_90d = ins.get("avg_claims_90d_baseline", 1)  # Historical baseline
+
+        # Guard: avoid division by zero; ignore isolated incidents (< 3 claims)
         if avg_claims_90d == 0 or claims_90d < 3:
             return None
 
+        # Surge ratio: how many times above baseline the current period is
         surge_ratio = claims_90d / avg_claims_90d
+
+        # Only alert on a material surge: ≥ 2× baseline claim frequency
         if surge_ratio < 2.0:
             return None
 
@@ -353,8 +541,8 @@ class InsuranceBrokerAlertEngine:
             client_golden_id=golden_id,
             client_name=client_name,
             alert_type="CLAIM_SURGE",
-            urgency="HIGH",
-            policy_id=None,
+            urgency="HIGH",  # Surge may indicate fraud or catastrophic event; needs fast review
+            policy_id=None,  # Portfolio-level event; not tied to a single policy
             headline=(
                 f"Claim surge: {claims_90d} claims in 90 days "
                 f"({surge_ratio:.1f}× baseline)"
@@ -369,5 +557,5 @@ class InsuranceBrokerAlertEngine:
                 "Escalate to claims investigations team. "
                 "Review all open claims for the client."
             ),
-            estimated_premium_zar=0.0,
+            estimated_premium_zar=0.0,  # Surge is a risk signal; no direct premium opportunity
         )

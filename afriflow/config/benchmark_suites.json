@@ -1,0 +1,69 @@
+{
+  "_comment": "AfriFlow CI benchmark suite definitions. Each suite is run independently with a hard timeout. Edit extra_args to pass additional pytest flags (e.g. -m 'not slow').",
+  "timeout_seconds": 300,
+  "suites": [
+    {
+      "name": "unit_cell",
+      "path": "tests/unit/cell",
+      "description": "Cell domain unit tests"
+    },
+    {
+      "name": "unit_cib",
+      "path": "tests/unit/cib",
+      "description": "CIB domain unit tests"
+    },
+    {
+      "name": "unit_forex",
+      "path": "tests/unit/forex",
+      "description": "Forex domain unit tests"
+    },
+    {
+      "name": "unit_insurance",
+      "path": "tests/unit/insurance",
+      "description": "Insurance domain unit tests"
+    },
+    {
+      "name": "unit_pbb",
+      "path": "tests/unit/pbb",
+      "description": "PBB domain unit tests"
+    },
+    {
+      "name": "unit_orchestration",
+      "path": "tests/unit/orchestration",
+      "description": "Orchestration unit tests"
+    },
+    {
+      "name": "unit_core",
+      "path": "tests/unit",
+      "description": "Remaining top-level unit tests (excludes domain sub-suites)",
+      "extra_args": [
+        "--ignore=tests/unit/cell",
+        "--ignore=tests/unit/cib",
+        "--ignore=tests/unit/forex",
+        "--ignore=tests/unit/insurance",
+        "--ignore=tests/unit/pbb",
+        "--ignore=tests/unit/orchestration"
+      ]
+    },
+    {
+      "name": "integration",
+      "path": "tests/integration",
+      "description": "Integration test suite"
+    },
+    {
+      "name": "data_quality",
+      "path": "tests/data_quality",
+      "description": "Data quality and domain freshness tests"
+    },
+    {
+      "name": "root_tests",
+      "path": "tests",
+      "description": "Root-level test modules (currency_map, constants, etc.)",
+      "extra_args": [
+        "--ignore=tests/unit",
+        "--ignore=tests/integration",
+        "--ignore=tests/data_quality"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,163 @@
+# =============================================================================
+# @file kustomization.yml
+# @description Kustomize overlay for the Nigeria country-pod (ng-pod).
+#              This overlay customises the base AfriFlow manifests for the
+#              Lagos-region deployment. Nigeria is AfriFlow's highest-volume
+#              country pod — it has Africa's largest economy, the highest
+#              number of mobile money transactions, and a volatile FX
+#              environment (NGN/USD). Patches in this overlay increase
+#              replica counts, raise resource limits, and tune Kafka
+#              replication to handle Nigeria's larger data throughput.
+# @author Thabo Kunene
+# @created 2026-03-17
+# =============================================================================
+
+# Kustomize overlay definition for the Nigeria country-pod.
+# Apply with: kubectl apply -k overlays/ng-pod/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# ---- Base resources -------------------------------------------------------
+# All base resources (namespace, kafka-cluster, flink-cluster, spark-operator)
+# are inherited from base/ and then patched by this overlay.
+resources:
+  - ../../base
+
+# ---- Namespace override ---------------------------------------------------
+# Same namespace as all other pods. Cross-pod isolation is achieved through
+# network policies and Kafka topic prefixes, not separate namespaces, to
+# simplify RBAC management.
+namespace: afriflow
+
+# ---- Common labels applied to every resource in this overlay --------------
+# Labels allow filtering all Nigeria-specific resources with:
+#   kubectl get all -l afriflow/country-pod=ng
+commonLabels:
+  afriflow/country-pod: ng          # ISO 3166-1 alpha-2 code for Nigeria
+  afriflow/region: west-africa      # Broad geographic grouping
+  afriflow/environment: production
+
+# ---- Common annotations --------------------------------------------------
+commonAnnotations:
+  afriflow/deployment-region: af-west-1       # Hypothetical AWS region near Lagos
+  afriflow/managed-by: kustomize
+  afriflow/country-contact: ops-ng@afriflow   # Nigeria pod on-call contact
+  afriflow/fx-volatility-tier: high           # Flag for the forex domain: NGN is highly volatile
+
+# ---- Images ---------------------------------------------------------------
+images:
+  - name: flink
+    newName: flink
+    newTag: "1.18.0"
+  - name: docker.io/kubeflow/spark-operator
+    newName: docker.io/kubeflow/spark-operator
+    newTag: "v1beta2-1.5.0-3.3.0"
+
+# ---- ConfigMap generators -------------------------------------------------
+# Nigeria-specific runtime configuration consumed by Flink/Spark domain jobs.
+configMapGenerator:
+  - name: afriflow-ng-config
+    literals:
+      - COUNTRY_CODE=NG
+      - CURRENCY_CODE=NGN                    # Nigerian Naira
+      - KAFKA_TOPIC_PREFIX=ng                # Topics prefixed "ng." for this pod
+      - FLINK_PARALLELISM=8                  # Higher than KE; 2 TMs × 4 slots
+      - SPARK_EXECUTOR_INSTANCES=4           # More executors for Nigeria's larger datasets
+      - TIMEZONE=Africa/Lagos                # WAT (UTC+1), no DST
+      - DATA_RETENTION_DAYS=90              # CBN (Central Bank of Nigeria) minimum
+      - MNO_PARTNER=MTN_Nigeria             # Primary mobile network operator for cell data
+      - FX_UPDATE_INTERVAL_SECONDS=30       # More frequent forex updates due to NGN volatility
+      - INFLATION_ADJUSTMENT_MODEL=quarterly # CBN publishes CPI quarterly
+
+# ---- Patches --------------------------------------------------------------
+# Nigeria receives more resources than the default base configuration to
+# handle its larger transaction volumes.
+patches:
+  # Scale Flink TaskManager to 2 replicas (base default). Nigeria's domain
+  # jobs run with parallelism 8, requiring all 8 task slots (2 TMs × 4 slots)
+  # to be filled simultaneously for peak throughput.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: flink-taskmanager
+        namespace: afriflow
+      spec:
+        replicas: 2  # 2 TMs × 4 slots = 8 slots for ng domain parallelism=8
+    target:
+      kind: Deployment
+      name: flink-taskmanager
+
+  # Increase TaskManager resource limits for Nigeria to accommodate the
+  # higher state size of Nigeria's entity resolution and MoMo aggregation.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: flink-taskmanager
+        namespace: afriflow
+      spec:
+        template:
+          spec:
+            containers:
+              - name: taskmanager
+                resources:
+                  requests:
+                    cpu: "2"
+                    memory: "6Gi"  # Up from 4Gi base; Nigeria state is ~50% larger
+                  limits:
+                    cpu: "2"
+                    memory: "6Gi"
+    target:
+      kind: Deployment
+      name: flink-taskmanager
+
+  # Raise Spark dynamic allocation cap for Nigeria's larger batch jobs
+  # (e.g. end-of-month CIB reconciliations spanning millions of records).
+  - patch: |-
+      apiVersion: sparkoperator.k8s.io/v1beta2
+      kind: SparkApplication
+      metadata:
+        name: spark-py-template
+        namespace: afriflow
+      spec:
+        dynamicAllocation:
+          initialExecutors: 4   # Start with 4 to reduce cold-start for large NG jobs
+          maxExecutors: 8       # Higher cap than KE (5) reflects NG data volume
+    target:
+      kind: SparkApplication
+      name: spark-py-template
+
+  # Apply the Nigeria-specific node selector to target Lagos-region nodes.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: flink-jobmanager
+        namespace: afriflow
+      spec:
+        template:
+          spec:
+            nodeSelector:
+              afriflow/node-type: streaming
+              afriflow/country-pod: ng  # Narrows to Nigeria-provisioned streaming nodes
+    target:
+      kind: Deployment
+      name: flink-jobmanager
+
+  # Apply the Nigeria node selector to TaskManager pods as well.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: flink-taskmanager
+        namespace: afriflow
+      spec:
+        template:
+          spec:
+            nodeSelector:
+              afriflow/node-type: streaming
+              afriflow/country-pod: ng
+    target:
+      kind: Deployment
+      name: flink-taskmanager

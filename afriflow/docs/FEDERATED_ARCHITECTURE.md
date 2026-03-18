@@ -1,3 +1,9 @@
+<!--
+@file FEDERATED_ARCHITECTURE.md
+@description Federated country pod architecture rationale covering legal and operational constraints
+@author Thabo Kunene
+@created 2026-03-17
+-->
 <!-- docs/FEDERATED_ARCHITECTURE.md -->
 
 # AfriFlow Federated Country Pod Architecture

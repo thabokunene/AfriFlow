@@ -1,4 +1,9 @@
-<!-- docs/INTEGRATION_PATTERNS.md -->
+<!--
+@file INTEGRATION_PATTERNS.md
+@description Catalog of integration patterns and contracts between AfriFlow modules
+@author Thabo Kunene
+@created 2026-03-17
+-->
 
 # Integration Patterns
 

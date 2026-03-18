@@ -1,4 +1,9 @@
-<!-- docs/COMPLIANCE.md -->
+<!--
+@file COMPLIANCE.md
+@description Regulatory compliance framework across jurisdictions and domain constraints
+@author Thabo Kunene
+@created 2026-03-17
+-->
 
 # Regulatory Compliance Framework
 

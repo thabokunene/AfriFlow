@@ -1,4 +1,11 @@
 """
+@file fx_trade_generator.py
+@description Synthetic FX trade generator modeling African market characteristics and seasonality
+@author Thabo Kunene
+@created 2026-03-17
+"""
+
+"""
 FX Trade Generator
 
 We generate realistic synthetic FX trade records
@@ -21,16 +28,16 @@ project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
-from __future__ import annotations
-import random
-import uuid
-import logging
+from __future__ import annotations  # allow forward-referenced type hints for dataclasses
+import random  # stochastic variability for rates and notional sizes
+import uuid  # unique trade identifiers generation
+import logging  # operational telemetry for generation lifecycle
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone  # UTC timestamps and date arithmetic
 from typing import Iterator, Optional, Dict, Any, List
 
-from afriflow.logging_config import get_logger
-from afriflow.domains.shared.interfaces import SimulatorBase
+from afriflow.logging_config import get_logger  # centralized JSON logging with structured context
+from afriflow.domains.shared.interfaces import SimulatorBase  # base simulator contract for consistency
 
 logger = get_logger("domains.forex.simulator.fx_trade_generator")
 
@@ -148,16 +155,24 @@ class FXTradeGenerator(SimulatorBase):
     """
 
     def __init__(self, config=None):
+        # Use shared logger; allow config injection for deterministic seeds or environment parameters
         self.logger = logger
         super().__init__(config)
 
     def initialize(self, config=None) -> None:
-        """Initialize the generator with configuration."""
+        """
+        Initialize generator with configuration.
+        Notes:
+        - Supports future expansion (e.g., loading seasonal calendars from YAML).
+        """
         self.config = config or self.config
         self.logger.info("FX Trade Generator initialized")
 
     def validate_input(self, **kwargs) -> None:
-        """Validate input parameters for trade generation."""
+        """
+        Validate input parameters for trade generation.
+        Raises ValueError when unsupported pairs/types/directions are provided.
+        """
         pair = kwargs.get("pair")
         if pair and pair not in AFRICAN_CURRENCY_PAIRS:
             raise ValueError(f"Unsupported currency pair: {pair}")
@@ -175,7 +190,10 @@ class FXTradeGenerator(SimulatorBase):
             raise ValueError("Notional must be positive")
 
     def _get_random_rate(self, pair: str) -> float:
-        """Generate a realistic exchange rate for the given pair."""
+        """
+        Generate a realistic exchange rate for the given pair.
+        Combines baseline reference rates with controlled random variation.
+        """
         # Base rates from the rate feed generator
         base_rates = {
             "USD/ZAR": 18.50, "USD/NGN": 1580.0, "USD/KES": 130.0,
@@ -189,7 +207,7 @@ class FXTradeGenerator(SimulatorBase):
         
         base_rate = base_rates.get(pair, 100.0)
         
-        # Add some random variation (±2% for normal pairs, ±5% for volatile ones)
+        # Variation captures daily market movement; higher for volatile pairs
         volatile_pairs = {"USD/ZWL", "USD/SSP", "USD/NGN", "USD/AOA", "USD/ETB"}
         max_variation = 0.05 if pair in volatile_pairs else 0.02
         
@@ -197,7 +215,10 @@ class FXTradeGenerator(SimulatorBase):
         return round(base_rate * (1 + variation), 4)
 
     def _generate_value_date(self, trade_type: str, traded_at: datetime) -> str:
-        """Generate appropriate value date based on trade type."""
+        """
+        Generate appropriate value date based on trade type.
+        Spot: typically T+2; Forwards: chosen tenor; Swaps: short tenors.
+        """
         if trade_type == "spot":
             # T+2 settlement for most currencies, T+1 for some
             settlement_days = 2
@@ -216,7 +237,10 @@ class FXTradeGenerator(SimulatorBase):
         return value_date.strftime("%Y-%m-%d")
 
     def generate_one(self, **kwargs) -> FXTrade:
-        """Generate a single FX trade."""
+        """
+        Generate a single FXTrade with seasonality-adjusted notional and realistic dates.
+        Returns FXTrade dataclass instance.
+        """
         self.validate_input(**kwargs)
         
         # Default parameters
@@ -238,7 +262,7 @@ class FXTradeGenerator(SimulatorBase):
         min_notional, max_notional = TYPICAL_NOTIONALS.get(pair, (10000, 500000))
         notional_usd = kwargs.get("notional_usd") or random.randint(min_notional, max_notional)
         
-        # Apply seasonal multiplier
+        # Apply seasonal multiplier to notional to reflect export/import seasonality
         current_month = datetime.now(timezone.utc).month
         seasonal_multiplier = SEASONAL_MULTIPLIERS.get(current_month, 1.0)
         notional_usd = int(notional_usd * seasonal_multiplier)
@@ -253,7 +277,7 @@ class FXTradeGenerator(SimulatorBase):
         
         value_date = self._generate_value_date(trade_type, traded_at)
         
-        # Generate maturity date for forwards/swaps
+        # Generate maturity date for forwards/ndf contracts; swaps may not require explicit maturity here
         maturity_date = None
         if trade_type in ["forward", "ndf"]:
             maturity_days = random.choice([30, 60, 90, 180])
@@ -264,7 +288,7 @@ class FXTradeGenerator(SimulatorBase):
         client_id = kwargs.get("client_id") or f"CLIENT-{random.randint(1000, 9999)}"
         client_golden_id = kwargs.get("client_golden_id") or (f"GOLDEN-{client_id}" if random.random() > 0.3 else None)
         
-        # Hedging information
+        # Hedging information to link trades to underlying payments when provided
         is_hedge = kwargs.get("is_hedge", False)
         underlying_payment_id = kwargs.get("underlying_payment_id") or (f"PAY-{random.randint(10000, 99999)}" if is_hedge else None)
         
@@ -288,7 +312,10 @@ class FXTradeGenerator(SimulatorBase):
         )
 
     def generate_hedge_trades(self, underlying_payment: str, currency: str, amount_usd: float, count: int = 1) -> List[FXTrade]:
-        """Generate hedging trades for an underlying payment."""
+        """
+        Generate hedging trades for an underlying payment.
+        Ensures valid pair selection and uses appropriate contract type by currency.
+        """
         trades = []
         
         # Find appropriate currency pair
@@ -316,7 +343,10 @@ class FXTradeGenerator(SimulatorBase):
         return trades
 
     def stream(self, count: int = 1, **kwargs) -> Iterator[FXTrade]:
-        """Stream multiple FX trades."""
+        """
+        Stream multiple FX trades.
+        Logs begin/end of stream and yields count trades using generate_one().
+        """
         if count <= 0:
             logger.warning(f"Invalid stream count: {count}")
             return

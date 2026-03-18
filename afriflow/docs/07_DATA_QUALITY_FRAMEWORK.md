@@ -1,4 +1,10 @@
-﻿# 07 Data Quality Framework
+<!--
+@file 07_DATA_QUALITY_FRAMEWORK.md
+@description Data quality dimensions, gates, and monitoring approach for AfriFlow pipelines
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 07 Data Quality Framework
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a

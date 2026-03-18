@@ -1,3 +1,15 @@
+# =============================================================================
+# @file ci-tests.yml
+# @description Main CI workflow that runs the AfriFlow test suite across
+#              multiple operating systems and Python versions. Uses matrix strategy
+#              to test compatibility with Ubuntu/Windows/macOS and Python 3.9/3.10/3.11.
+#              Runs pytest with coverage reporting and enforces quality gates.
+#              Critical for ensuring cross-platform compatibility and preventing
+#              regressions across different Python environments.
+# @author Thabo Kunene
+# @created 2026-03-18
+# =============================================================================
+
 name: CI - Run Pytest (Matrix)
 
 on:
@@ -128,7 +140,7 @@ jobs:
           python scripts/cell_coverage_report.py \
             --xml coverage.xml \
             --json coverage.json \
-            --include-subpath domains/cell/ingestion \
+            --include-subpath cell/ingestion \
             --line-min 90 \
             --branch-min 90 \
             --func-min 90 \
@@ -154,7 +166,7 @@ jobs:
           python scripts/cell_coverage_report.py \
             --xml coverage.xml \
             --json coverage.json \
-            --include-subpath domains/forex/ingestion \
+            --include-subpath forex/ingestion \
             --line-min 90 \
             --branch-min 0 \
             --func-min 0 \
@@ -169,7 +181,7 @@ jobs:
           python scripts/cell_coverage_report.py \
             --xml coverage.xml \
             --json coverage.json \
-            --include-subpath domains/cib/processing/flink \
+            --include-subpath cib/processing/flink \
             --include-file-pattern "flow_drift_detector\.py" \
             --line-min 90 \
             --branch-min 0 \
@@ -201,6 +213,120 @@ jobs:
         working-directory: afriflow
         run: python scripts/check_imports.py --check --path domains
 
+  benchmark:
+    name: Benchmark — 5-min per-suite timeout
+    runs-on: ubuntu-latest
+    # Run on every push and PR so that baselines are kept current on main
+    # and violations block PR merges when this job is a required check.
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ------------------------------------------------------------------
+      # Install the project in dev mode so all test imports resolve.
+      # We don't need the full matrix — a single canonical env is enough
+      # to measure suite durations reliably.
+      # ------------------------------------------------------------------
+      - name: Install dependencies
+        working-directory: afriflow
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # ------------------------------------------------------------------
+      # Restore cached baseline from the most recent main-branch run so
+      # we always have a meaningful historical comparison available.
+      # The cache is keyed to `main` so every branch reads the same
+      # canonical baseline; the updated file is re-cached after the run.
+      # ------------------------------------------------------------------
+      - name: Restore benchmark baseline cache
+        id: baseline-cache
+        uses: actions/cache@v4
+        with:
+          path: afriflow/config/benchmark_baselines.json
+          key: benchmark-baseline-main
+          restore-keys: |
+            benchmark-baseline-
+
+      - name: Log baseline cache status
+        shell: bash
+        run: |
+          if [ "${{ steps.baseline-cache.outputs.cache-hit }}" = "true" ]; then
+            echo "Baseline cache HIT — historical trend data available." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Baseline cache MISS — first-run baselines will be established." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ------------------------------------------------------------------
+      # Core benchmark step: runs every suite with a hard 5-minute kill,
+      # records timing data, compares against the rolling baseline, and
+      # writes the Markdown report directly into the GitHub step summary.
+      # The script exits 1 when any suite exceeds the threshold, which
+      # causes this job to fail and blocks the PR merge.
+      # ------------------------------------------------------------------
+      - name: Run benchmark monitor
+        working-directory: afriflow
+        run: |
+          python scripts/benchmark_ci.py \
+            --suites-config config/benchmark_suites.json \
+            --baseline      config/benchmark_baselines.json \
+            --output-json   coverage/benchmark_report.json \
+            --github-summary "$GITHUB_STEP_SUMMARY"
+
+      # ------------------------------------------------------------------
+      # Persist the updated baseline so the next run has fresh history.
+      # Runs even when the benchmark step fails so we never lose timing
+      # data (the failure itself is already recorded in the baseline).
+      # ------------------------------------------------------------------
+      - name: Save updated benchmark baseline
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: afriflow/config/benchmark_baselines.json
+          key: benchmark-baseline-main
+
+      # ------------------------------------------------------------------
+      # Upload timing artifacts for debugging and trend analysis.
+      # The JSON report is consumed by dashboards or future tooling;
+      # the baseline snapshot shows the state written after this run.
+      # ------------------------------------------------------------------
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          retention-days: 30
+          path: |
+            afriflow/coverage/benchmark_report.json
+            afriflow/config/benchmark_baselines.json
+
+      # ------------------------------------------------------------------
+      # Emit a compact violation summary into the PR check annotations so
+      # engineers see the breach without opening the full step log.
+      # ------------------------------------------------------------------
+      - name: Annotate PR on violation
+        if: failure() && github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          REPORT=afriflow/coverage/benchmark_report.json
+          if [ -f "$REPORT" ]; then
+            python - <<'PY'
+          import json, sys
+          with open("afriflow/coverage/benchmark_report.json", encoding="utf-8") as f:
+              data = json.load(f)
+          for v in data.get("violations", []):
+              print(f"::error title=Benchmark Violation::{v}")
+          PY
+          else
+            echo "::error title=Benchmark Violation::benchmark_report.json not found — check the run step for details."
+          fi
+
   quality:
     name: Quality Gates (lint + typecheck)
     runs-on: ubuntu-latest
@@ -229,3 +355,119 @@ jobs:
       - name: Type check (mypy)
         working-directory: afriflow
         run: mypy .
+
+  talking_points_engine:
+    name: Talking Points Engine (coverage + docs)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies (dev)
+        working-directory: afriflow
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pytest-cov coverage
+
+      - name: Run engine tests with module coverage
+        working-directory: afriflow
+        run: |
+          python -m pytest -q -o addopts="" \
+            --cov=afriflow.integration.client_briefing.talking_points_engine \
+            --cov-branch \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-report=html \
+            tests/unit/client_briefing/test_talking_points_engine.py \
+            tests/integration/client_briefing/test_talking_points_engine_integration.py
+
+      - name: Enforce engine thresholds (line >= 80%, branch >= 75%)
+        working-directory: afriflow
+        run: |
+          python scripts/ensure_cobertura_thresholds.py \
+            --xml coverage.xml \
+            --filename integration/client_briefing/talking_points_engine.py \
+            --line-min 80 \
+            --branch-min 75
+
+      - name: Upload engine coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: talking-points-engine-coverage
+          path: |
+            afriflow/coverage.xml
+            afriflow/htmlcov
+            afriflow/integration/client_briefing/README-talking-points-engine.md
+
+      - name: Prepare documentation site
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        shell: bash
+        run: |
+          rm -rf site
+          mkdir -p site/integration
+          cp -r afriflow/docs/* site/
+          cp afriflow/README.md site/README.md
+          cp afriflow/README.md site/index.md
+          cp afriflow/integration/client_briefing/README-talking-points-engine.md site/integration/TALKING_POINTS_ENGINE.md
+
+      - name: Configure GitHub Pages
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  global-coverage-gate:
+    name: Global Branch Coverage Gate (>= 75%)
+    needs: [tests, talking_points_engine]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-coverage
+
+      - name: Aggregate and Enforce Global Branch Coverage
+        working-directory: afriflow
+        run: |
+          # Collect all coverage.xml files found in the downloaded artifacts
+          XML_FILES=$(find ../all-coverage -name "coverage.xml")
+          
+          # Build the command arguments
+          CMD_ARGS=""
+          for f in $XML_FILES; do
+            CMD_ARGS="$CMD_ARGS --xml $f"
+          done
+          
+          # Run the aggregator script with 75% branch coverage threshold
+          python scripts/aggregate_coverage_gate.py \
+            $CMD_ARGS \
+            --min-branch-coverage 75.0 \
+            --show-gaps 15
+

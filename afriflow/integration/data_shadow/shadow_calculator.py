@@ -1,4 +1,15 @@
 """
+@file shadow_calculator.py
+@description Data Shadow Calculator for the AfriFlow integration layer.
+             Applies a rule-based inference engine to detect gaps between
+             expected and actual domain presence for each client. Each rule
+             infers an expected domain from confirmed activity in another domain.
+             Gaps are classified as COMPETITIVE_LEAKAGE, COVERAGE_GAP,
+             DATA_FEED_ISSUE, or DORMANT_RELATIONSHIP, with estimated ZAR
+             revenue opportunities attached to each shadow record.
+@author Thabo Kunene
+@created 2026-03-18
+
 DATA SHADOW CALCULATOR
 
 We compute the expected data footprint for every client across all five
@@ -14,12 +25,17 @@ It is a demonstration of concept, domain knowledge, and technical skill
 built by Thabo Kunene for portfolio and learning purposes only.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
-from enum import Enum
-from datetime import datetime
+from dataclasses import dataclass, field  # clean value objects for shadow records
+from typing import Dict, List, Optional, Set  # full type annotations
+from enum import Enum                    # typed shadow categories
+from datetime import datetime            # shadow_id timestamps and detected_at fields
 
 
+# Categories explain WHY a shadow exists — distinct from severity.
+# COMPETITIVE_LEAKAGE: client is likely using a competitor for this service.
+# COVERAGE_GAP: client has an unmet insurance or protection need.
+# DATA_FEED_ISSUE: the absence may be a pipeline issue rather than a real gap.
+# DORMANT_RELATIONSHIP: historical relationship with no recent activity.
 class ShadowCategory(Enum):
     COMPETITIVE_LEAKAGE = "COMPETITIVE_LEAKAGE"
     COVERAGE_GAP = "COVERAGE_GAP"
@@ -85,11 +101,19 @@ class ShadowRule:
 
 class DataShadowCalculator:
     """
-    Calculates data shadows for all resolved clients by
-    comparing expected domain presence against actual
-    domain presence in the golden record.
+    Calculates data shadows for all resolved clients by comparing
+    expected domain presence against actual domain presence.
+
+    Shadow rules are registered at initialisation time. Each rule
+    defines a condition (based on one domain's data) that implies
+    another domain should also be present. When the implied domain
+    is absent, a DataShadow record is created with revenue estimates
+    and a recommended RM action.
     """
 
+    # Countries where MTN has an active commercial presence and JV agreement.
+    # Used by the cib_implies_cell rule — CIB activity in these countries
+    # implies we should see cell data if the client uses MTN services.
     MTN_COVERAGE_COUNTRIES = {
         "ZA", "NG", "GH", "UG", "RW", "ZM", "MZ",
         "CI", "CM", "BJ", "CG", "GW", "LR", "SD",
@@ -97,12 +121,23 @@ class DataShadowCalculator:
     }
 
     def __init__(self):
+        """Initialise the calculator and register all default inference rules."""
         self.rules: List[ShadowRule] = []
+        # Populate the rule registry with the built-in cross-domain inference rules
         self._register_default_rules()
 
     def _register_default_rules(self):
-        """Register the default cross domain inference rules."""
+        """
+        Register the default cross-domain inference rules.
 
+        Each rule encodes a specific piece of domain knowledge about which
+        domain combinations should co-occur. Confidence values reflect how
+        reliably the source domain implies the expected domain.
+        """
+
+        # Rule 1: CIB foreign payments → should have forex hedging
+        # Confidence 0.85 because virtually all material cross-border CIB
+        # clients should be hedging their FX exposure with their primary bank
         self.rules.append(ShadowRule(
             name="cib_implies_forex",
             source_domain="cib",
@@ -117,6 +152,8 @@ class DataShadowCalculator:
             ),
         ))
 
+        # Rule 2: CIB in MTN coverage country → should see cell SIM data
+        # Confidence 0.70 because some clients may use Airtel/Vodacom instead
         self.rules.append(ShadowRule(
             name="cib_implies_cell",
             source_domain="cib",
@@ -131,6 +168,9 @@ class DataShadowCalculator:
             ),
         ))
 
+        # Rule 3: Corporate SIM presence → should have PBB payroll accounts
+        # Confidence 0.75 — employees with corporate SIMs are likely banked
+        # elsewhere if we have no PBB salary records for this employer
         self.rules.append(ShadowRule(
             name="cell_implies_pbb",
             source_domain="cell",
@@ -145,6 +185,9 @@ class DataShadowCalculator:
             ),
         ))
 
+        # Rule 4: Large CIB activity with supplier payments → should have insurance
+        # Confidence 0.65 — physical operations are likely but not certain from
+        # payment data alone
         self.rules.append(ShadowRule(
             name="cib_implies_insurance",
             source_domain="cib",
@@ -159,6 +202,9 @@ class DataShadowCalculator:
             ),
         ))
 
+        # Rule 5: Spot FX trading without sufficient forward cover → hedge gap
+        # Confidence 0.80 because clients with >USD 50M in spot volume almost
+        # always have significant unhedged exposure if forward ratio is < 30%
         self.rules.append(ShadowRule(
             name="cib_forex_hedge_gap",
             source_domain="forex",
@@ -230,18 +276,31 @@ class DataShadowCalculator:
     def _forex_has_hedge_gap(
         self, client_data: Dict
     ) -> Optional[List[str]]:
-        """Check if client has low hedge ratio."""
+        """
+        Check if client has a dangerously low hedge ratio.
+
+        A hedge ratio below 30% on more than USD 50M in spot volume
+        suggests the client is carrying significant unhedged FX risk.
+        This is a product coverage gap — we should be offering forward
+        contracts to lock in their known cash flows.
+
+        :param client_data: All available domain data for the client
+        :return: List of traded currencies if hedge gap exists, else None
+        """
 
         forex = client_data.get("forex", {})
         spot_volume = forex.get("spot_volume_90d", 0)
         forward_volume = forex.get("forward_volume_90d", 0)
 
+        # Only flag clients with material spot volume (>= USD 50M in 90 days)
         if spot_volume > 50_000_000:
+            # Hedge ratio = forward cover ÷ spot volume
             hedge_ratio = (
                 forward_volume / spot_volume
                 if spot_volume > 0
                 else 0
             )
+            # Flag if less than 30% of spot volume is covered by forwards
             if hedge_ratio < 0.30:
                 currencies = forex.get("currencies_traded", [])
                 return currencies if currencies else ["UNKNOWN"]
@@ -321,10 +380,21 @@ class DataShadowCalculator:
         country: str,
     ) -> float:
         """
-        Estimate the revenue opportunity represented by
-        a data shadow.
+        Estimate the ZAR revenue opportunity represented by a data shadow.
+
+        Revenue estimates are derived from:
+        - Forex: 0.3% of CIB annual value (typical FX spread on corridor volume)
+        - Insurance: 0.2% of CIB annual value (typical commercial insurance premium rate)
+        - PBB: SIM count × R2,500 (average annual banking revenue per banked employee)
+        - Cell: 0.1% of CIB annual value (telco JV revenue from corporate accounts)
+
+        :param expected_domain: Domain where the gap exists
+        :param client_data: Full client data dict for extracting CIB/cell metrics
+        :param country: Country where the shadow was detected
+        :return: Estimated ZAR annual revenue opportunity
         """
 
+        # Retrieve the client's CIB annual corridor value for this country
         cib_value = (
             client_data.get("cib", {})
             .get("by_country", {})
@@ -332,17 +402,19 @@ class DataShadowCalculator:
             .get("annual_value", 0)
         )
 
+        # Revenue multipliers are conservative estimates based on market benchmarks
         estimates = {
-            "forex": cib_value * 0.003,
-            "insurance": cib_value * 0.002,
+            "forex": cib_value * 0.003,        # 30 bps of corridor value
+            "insurance": cib_value * 0.002,    # 20 bps of corridor value
             "pbb": (
+                # Employee headcount (from SIM data) × per-employee banking revenue
                 client_data.get("cell", {})
                 .get("by_country", {})
                 .get(country, {})
                 .get("sim_count", 0)
                 * 2500
             ),
-            "cell": cib_value * 0.001,
+            "cell": cib_value * 0.001,         # 10 bps of corridor value
         }
 
         return estimates.get(expected_domain, 0.0)

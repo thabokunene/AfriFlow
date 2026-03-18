@@ -1,39 +1,32 @@
 """
-Seasonal Adjustment - Agricultural Calendar
-
-Africa's agricultural seasons are the single biggest driver
-of informal economy cash flow patterns. A MoMo velocity
-spike in October in Ghana is not anomalous — it is cocoa
-harvest. A payment drop in March in Zambia is not churn —
-it is post-maize planting season credit stress.
-
-We encode country × sector × month seasonal patterns so
-that downstream signal detectors can distinguish genuine
-business signals from expected seasonal noise.
-
-Key calendars covered:
-  ZA  – maize (Apr–Jun harvest), citrus (Jul–Sep),
-         wine (Feb–Apr), platinum/gold mining cycles
-  NG  – cocoa (Oct–Feb), groundnuts (Aug–Oct),
-         oil palm (Oct–Nov), sorghum (Sep–Nov)
-  KE  – tea (Apr–Jun, Oct–Dec long rain/short rain),
-         coffee (Oct–Jan), flowers (year-round, peak Feb)
-  GH  – cocoa (Oct–Jan main crop, May–Jun light crop),
-         gold, timber
-  ZM  – copper (relatively stable, price-driven not seasonal),
-         maize (Mar–May harvest)
-  TZ  – coffee (Jul–Oct), cashews (Dec–Mar),
-         sisal (year-round), tourism (Jun–Oct dry season)
-  CI  – cocoa (Oct–Feb main, Apr–Jul intermediate),
-         coffee (Nov–Feb), cashew (Mar–Jun)
-  MZ  – tobacco (Jul–Sep), prawns (Apr–Nov),
-         sugar (May–Nov)
-
-DISCLAIMER: This project is not a sanctioned initiative
-of Standard Bank Group, MTN, or any affiliated entity.
-It is a demonstration of concept, domain knowledge,
-and data engineering skill by Thabo Kunene.
+@file agricultural_calendar.py
+@description Encodes country × sector × month agricultural seasonal patterns
+    for AfriFlow's seasonal adjustment layer. Provides revenue multipliers,
+    season phase labels, and cash flow direction enums per month so that
+    downstream detectors can distinguish genuine anomalies from expected
+    harvest-season variation. Covers ZA, NG, KE, GH, ZM, TZ, CI, and MZ.
+@author Thabo Kunene
+@created 2026-03-18
 """
+# Context:
+# Africa's agricultural seasons are the single biggest driver of informal
+# economy cash flow patterns. A MoMo velocity spike in October in Ghana is
+# not anomalous — it is cocoa harvest. A payment drop in March in Zambia
+# is not churn — it is post-maize planting season credit stress.
+#
+# Key calendars covered:
+#   ZA  – maize (Apr–Jun harvest), wine (Feb–Apr), gold (year-round)
+#   NG  – cocoa (Oct–Feb main crop)
+#   KE  – tea (two flush seasons), coffee (Oct–Dec harvest)
+#   GH  – cocoa (Oct–Jan main crop, May–Jun light crop)
+#   ZM  – copper (continuous, price-driven), maize (Apr–Jul harvest)
+#   TZ  – coffee (Jul–Oct harvest)
+#   CI  – cocoa (Oct–Mar main crop, Apr–Jul mid-crop)
+#   ZA  – wine & citrus (Feb–Apr wine, Jul–Sep citrus)
+#
+# DISCLAIMER: This project is not a sanctioned initiative of Standard Bank
+# Group, MTN, or any affiliated entity. It is a demonstration of concept,
+# domain knowledge, and data engineering skill by Thabo Kunene.
 
 from dataclasses import dataclass, field
 from datetime import date
@@ -42,43 +35,61 @@ from enum import Enum
 
 from afriflow.logging_config import get_logger
 
+# Module-level logger for tracing calendar load and lookup activity
 logger = get_logger("integration.seasonal_adjustment.agricultural_calendar")
 
 
 class SeasonPhase(Enum):
-    """Phase of an agricultural season."""
-    PLANTING = "planting"
-    GROWING = "growing"
-    HARVEST = "harvest"
-    POST_HARVEST = "post_harvest"
-    OFF_SEASON = "off_season"
+    """Phase of an agricultural season.
+
+    Used to label each calendar month with its agronomic meaning
+    so that signal detectors can contextualise anomalies correctly.
+    """
+    PLANTING = "planting"           # Seed/seedling establishment — low activity
+    GROWING = "growing"             # Crop development — moderate low activity
+    HARVEST = "harvest"             # Crop collection — high cash flow
+    POST_HARVEST = "post_harvest"   # Storage, grading, first sales — moderate high
+    OFF_SEASON = "off_season"       # Between crop cycles — lowest activity
 
 
 class CashFlowDirection(Enum):
-    """Expected cash flow direction relative to baseline."""
-    STRONGLY_POSITIVE = "strongly_positive"    # >30% above baseline
-    POSITIVE = "positive"                       # 10-30% above
-    NEUTRAL = "neutral"                         # ±10%
-    NEGATIVE = "negative"                       # 10-30% below
-    STRONGLY_NEGATIVE = "strongly_negative"     # >30% below
+    """Expected cash flow direction relative to the annual baseline.
+
+    Thresholds are applied in _build_cashflow_from_multiplier:
+      >= 1.30 → STRONGLY_POSITIVE
+      >= 1.10 → POSITIVE
+      >= 0.90 → NEUTRAL
+      >= 0.70 → NEGATIVE
+       < 0.70 → STRONGLY_NEGATIVE
+    """
+    STRONGLY_POSITIVE = "strongly_positive"    # >30% above annual baseline
+    POSITIVE = "positive"                       # 10–30% above baseline
+    NEUTRAL = "neutral"                         # Within ±10% of baseline
+    NEGATIVE = "negative"                       # 10–30% below baseline
+    STRONGLY_NEGATIVE = "strongly_negative"     # >30% below baseline
 
 
 @dataclass
 class SeasonalPattern:
-    """
-    Monthly seasonal pattern for a country × sector combination.
+    """Monthly seasonal pattern for a country × sector combination.
+
+    Stores per-month revenue multipliers, season phases, and cash flow
+    direction labels. Peak and trough month lists support quick range
+    checks without iterating the full multiplier dict.
 
     Attributes:
-        country: ISO-2 country code
-        sector: Economic sector (e.g., "cocoa", "maize", "copper")
-        month_multipliers: Dict of month (1–12) → expected revenue multiplier
-        phase_by_month: Dict of month → SeasonPhase
-        cashflow_by_month: Dict of month → CashFlowDirection
-        notes: Human-readable explanation of the pattern
+        country: ISO-2 country code (e.g. "GH", "ZA")
+        sector: Commodity/sector name (e.g. "cocoa", "maize", "copper")
+        month_multipliers: Dict of month (1–12) → revenue multiplier vs annual avg
+        phase_by_month: Dict of month → SeasonPhase enum value
+        cashflow_by_month: Dict of month → CashFlowDirection (derived from multiplier)
+        peak_months: Months where multiplier is highest (typically harvest)
+        trough_months: Months where multiplier is lowest (typically off-season)
+        notes: Human-readable explanation of the seasonal pattern
     """
     country: str
     sector: str
-    month_multipliers: Dict[int, float]         # 1.0 = baseline
+    month_multipliers: Dict[int, float]         # 1.0 = annual average revenue
     phase_by_month: Dict[int, SeasonPhase]
     cashflow_by_month: Dict[int, CashFlowDirection]
     peak_months: List[int]
@@ -86,50 +97,88 @@ class SeasonalPattern:
     notes: str = ""
 
     def get_multiplier(self, month: int) -> float:
-        """Get revenue multiplier for a given month (1–12)."""
+        """Get the revenue multiplier for a given month (1–12).
+
+        Returns 1.0 (no adjustment) if the month is not in the pattern,
+        so callers always receive a safe default.
+        """
         return self.month_multipliers.get(month, 1.0)
 
     def get_phase(self, month: int) -> SeasonPhase:
-        """Get season phase for a given month."""
+        """Get the agricultural season phase for a given month.
+
+        Defaults to OFF_SEASON when the month is not mapped, which is
+        the safest assumption for unrecognised periods.
+        """
         return self.phase_by_month.get(month, SeasonPhase.OFF_SEASON)
 
     def get_cashflow_direction(self, month: int) -> CashFlowDirection:
-        """Get expected cash flow direction for a given month."""
+        """Get the expected cash flow direction for a given month.
+
+        Defaults to NEUTRAL when the month is not mapped.
+        """
         return self.cashflow_by_month.get(month, CashFlowDirection.NEUTRAL)
 
     def is_peak_month(self, month: int) -> bool:
+        """Return True if the month is one of the identified peak months."""
         return month in self.peak_months
 
     def is_trough_month(self, month: int) -> bool:
+        """Return True if the month is one of the identified trough months."""
         return month in self.trough_months
 
 
 def _build_cashflow_from_multiplier(multiplier: float) -> CashFlowDirection:
+    """Derive a CashFlowDirection enum from a numeric multiplier.
+
+    Applies fixed threshold bands to classify expected cash flow
+    relative to the annual average for this country × sector.
+
+    Args:
+        multiplier: Revenue multiplier (1.0 = annual average).
+
+    Returns:
+        Corresponding CashFlowDirection enum value.
+    """
     if multiplier >= 1.30:
-        return CashFlowDirection.STRONGLY_POSITIVE
+        return CashFlowDirection.STRONGLY_POSITIVE  # Harvest surge
     elif multiplier >= 1.10:
-        return CashFlowDirection.POSITIVE
+        return CashFlowDirection.POSITIVE           # Moderate above average
     elif multiplier >= 0.90:
-        return CashFlowDirection.NEUTRAL
+        return CashFlowDirection.NEUTRAL            # Within normal range
     elif multiplier >= 0.70:
-        return CashFlowDirection.NEGATIVE
+        return CashFlowDirection.NEGATIVE           # Moderate below average
     else:
-        return CashFlowDirection.STRONGLY_NEGATIVE
+        return CashFlowDirection.STRONGLY_NEGATIVE  # Deep off-season trough
 
 
 # ── Seasonal pattern definitions ─────────────────────────────────────────────
 # Multipliers derived from domain knowledge of African agricultural cycles.
 # A multiplier of 1.35 means cash flows in that month are expected to be
 # 35% above the annual average for this country × sector.
+# These inform SeasonalPattern.month_multipliers; cashflow_by_month is derived
+# automatically in _build_pattern() using _build_cashflow_from_multiplier().
 
 _PATTERNS_RAW: List[Dict] = [
     # ── Ghana Cocoa ─────────────────────────────────────────────────────────
+    # Main crop: Oct–Feb (peak Nov–Jan); light/mid-crop: May–Jul
+    # Farmer income reaches KTDA-equivalent peak at licensed buying company payments.
     {
         "country": "GH",
         "sector": "cocoa",
         "month_multipliers": {
-            1: 1.40, 2: 1.10, 3: 0.80, 4: 0.70, 5: 0.75, 6: 0.90,
-            7: 1.00, 8: 0.85, 9: 0.80, 10: 1.20, 11: 1.45, 12: 1.50,
+            # Jan still in main crop tail; Feb post-harvest winding down
+            1: 1.40, 2: 1.10,
+            # Mar–Apr: off-season / early planting
+            3: 0.80, 4: 0.70,
+            # May–Jun: light crop begins
+            5: 0.75, 6: 0.90,
+            # Jul: light crop post-harvest
+            7: 1.00,
+            # Aug–Sep: new season planting / growing
+            8: 0.85, 9: 0.80,
+            # Oct–Dec: main crop harvest surge
+            10: 1.20, 11: 1.45, 12: 1.50,
         },
         "phase_by_month": {
             1: SeasonPhase.HARVEST, 2: SeasonPhase.POST_HARVEST,
@@ -139,8 +188,8 @@ _PATTERNS_RAW: List[Dict] = [
             9: SeasonPhase.GROWING, 10: SeasonPhase.GROWING,
             11: SeasonPhase.HARVEST, 12: SeasonPhase.HARVEST,  # main crop
         },
-        "peak_months": [11, 12, 1],
-        "trough_months": [3, 4, 9],
+        "peak_months": [11, 12, 1],    # Main crop peak
+        "trough_months": [3, 4, 9],    # Deep off-season
         "notes": "Main crop harvested Oct–Feb; light crop May–Jul. "
                  "Farmer income spikes at weighing station payments.",
     },
@@ -290,8 +339,20 @@ _PATTERNS_RAW: List[Dict] = [
 
 
 def _build_pattern(raw: Dict) -> SeasonalPattern:
-    """Build a SeasonalPattern with cashflow derived from multipliers."""
+    """Build a SeasonalPattern dataclass from a raw dict definition.
+
+    Derives cashflow_by_month automatically from the multipliers so that
+    the raw pattern definitions don't need to duplicate that information.
+
+    Args:
+        raw: Dict with keys: country, sector, month_multipliers,
+             phase_by_month, peak_months, trough_months, notes.
+
+    Returns:
+        Fully constructed SeasonalPattern instance.
+    """
     multipliers = raw["month_multipliers"]
+    # Derive CashFlowDirection for each month directly from the multiplier value
     cashflow = {m: _build_cashflow_from_multiplier(v) for m, v in multipliers.items()}
     return SeasonalPattern(
         country=raw["country"],
@@ -306,23 +367,26 @@ def _build_pattern(raw: Dict) -> SeasonalPattern:
 
 
 class AgriculturalCalendar:
-    """
-    We encode country × sector agricultural seasonal patterns.
+    """We encode country × sector agricultural seasonal patterns.
 
     These patterns are used to adjust signal thresholds so that
     harvest-season cash flow spikes are not misclassified as
     anomalies, and post-harvest troughs are not misclassified
     as churn or data quality failures.
 
+    On construction, all built-in patterns from _PATTERNS_RAW are
+    loaded into a dict keyed by "COUNTRY:sector" for O(1) lookup.
+
     Attributes:
-        patterns: Loaded patterns keyed by "COUNTRY:sector"
+        patterns: Loaded patterns keyed by "COUNTRY:sector" e.g. "GH:cocoa"
     """
 
     def __init__(self) -> None:
-        """Load all built-in agricultural patterns."""
+        """Load all built-in agricultural patterns into the registry."""
         self.patterns: Dict[str, SeasonalPattern] = {}
         for raw in _PATTERNS_RAW:
             pattern = _build_pattern(raw)
+            # Key format: UPPERCASE_COUNTRY:lowercase_sector
             key = f"{pattern.country}:{pattern.sector}"
             self.patterns[key] = pattern
 
@@ -332,6 +396,7 @@ class AgriculturalCalendar:
         )
 
     def _countries(self) -> List[str]:
+        """Return the distinct set of country codes represented in the registry."""
         return list({p.country for p in self.patterns.values()})
 
     def get_pattern(
@@ -339,19 +404,21 @@ class AgriculturalCalendar:
         country: str,
         sector: str
     ) -> Optional[SeasonalPattern]:
-        """
-        Get seasonal pattern for a country × sector combination.
+        """Get seasonal pattern for a country × sector combination.
+
+        Case-normalises the lookup key (country → upper, sector → lower).
 
         Args:
-            country: ISO-2 country code
-            sector: Sector name (e.g., "cocoa", "maize", "tea")
+            country: ISO-2 country code (e.g. "GH", "ZA")
+            sector: Sector name (e.g. "cocoa", "maize", "tea")
 
         Returns:
-            SeasonalPattern if found, else None
+            SeasonalPattern if registered, else None.
         """
         key = f"{country.upper()}:{sector.lower()}"
         pattern = self.patterns.get(key)
         if pattern is None:
+            # Log at DEBUG level — missing patterns are expected for unknown combinations
             logger.debug(f"No pattern for {key}")
         return pattern
 
@@ -361,8 +428,10 @@ class AgriculturalCalendar:
         sector: str,
         month: int
     ) -> float:
-        """
-        Get revenue multiplier for country × sector × month.
+        """Get the revenue multiplier for a country × sector × month combination.
+
+        Returns 1.0 (no adjustment) when no pattern is registered, so the caller
+        always receives a safe default and the signal is passed through unchanged.
 
         Args:
             country: ISO-2 country code
@@ -370,11 +439,11 @@ class AgriculturalCalendar:
             month: Month number (1–12)
 
         Returns:
-            Multiplier (1.0 = baseline, >1 = above average)
+            Revenue multiplier; 1.0 = annual average baseline.
         """
         pattern = self.get_pattern(country, sector)
         if pattern is None:
-            return 1.0
+            return 1.0  # Safe default: no seasonal adjustment
         return pattern.get_multiplier(month)
 
     def get_phase(
@@ -383,7 +452,11 @@ class AgriculturalCalendar:
         sector: str,
         month: int
     ) -> SeasonPhase:
-        """Get season phase for country × sector × month."""
+        """Get the agricultural season phase for a country × sector × month.
+
+        Returns OFF_SEASON when no pattern is registered, which is the safest
+        default for downstream consumers.
+        """
         pattern = self.get_pattern(country, sector)
         if pattern is None:
             return SeasonPhase.OFF_SEASON
@@ -396,23 +469,29 @@ class AgriculturalCalendar:
         month: int,
         observed_uplift: float
     ) -> bool:
-        """
-        Check if an observed cash flow uplift is within expected seasonal range.
+        """Check whether an observed cash flow uplift is explainable by seasonality.
+
+        Compares the observed uplift multiplier to the expected seasonal multiplier.
+        If the difference is within ±20%, the signal is classified as seasonal.
 
         Args:
             country: ISO-2 country code
             sector: Sector name
             month: Month number (1–12)
-            observed_uplift: Observed multiplier vs baseline
+            observed_uplift: Observed revenue multiplier vs the client's own baseline
 
         Returns:
-            True if the uplift is within ±20% of expected seasonal multiplier
+            True if the uplift is within ±20% of the expected seasonal multiplier.
         """
         expected = self.get_multiplier(country, sector, month)
+        # ±0.20 tolerance window — signals inside this band are seasonal noise
         return abs(observed_uplift - expected) <= 0.20
 
     def get_sectors(self, country: str) -> List[str]:
-        """Get all sectors with patterns for a country."""
+        """Get all sector names for which a pattern exists for a given country.
+
+        Filters the pattern registry by country prefix and extracts sector names.
+        """
         prefix = f"{country.upper()}:"
         return [
             key.split(":")[1]
@@ -421,7 +500,10 @@ class AgriculturalCalendar:
         ]
 
     def get_peak_months(self, country: str, sector: str) -> List[int]:
-        """Get peak months for a country × sector."""
+        """Get the list of peak revenue months for a country × sector.
+
+        Returns an empty list when no pattern is registered.
+        """
         pattern = self.get_pattern(country, sector)
         return pattern.peak_months if pattern else []
 
@@ -429,27 +511,30 @@ class AgriculturalCalendar:
         self,
         country: str
     ) -> Dict[str, Dict[int, float]]:
-        """
-        Get full calendar summary for a country.
+        """Get a full month-by-month multiplier summary for all sectors in a country.
+
+        Useful for RM briefing generation and BI dashboards.
 
         Returns:
-            Dict of sector → month → multiplier
+            Dict of sector → {month: multiplier} for months 1–12.
         """
         sectors = self.get_sectors(country)
         return {
             sector: {
                 m: self.get_multiplier(country, sector, m)
-                for m in range(1, 13)
+                for m in range(1, 13)  # Iterate all 12 calendar months
             }
             for sector in sectors
         }
 
     def get_country_peak_month(self, country: str) -> Tuple[str, int, float]:
-        """
-        Find the single highest-multiplier month across all sectors.
+        """Find the single highest-revenue month across all sectors for a country.
+
+        Useful for identifying the most cash-flow-intensive month, e.g.
+        Ghana November for cocoa harvest or South Africa May for maize.
 
         Returns:
-            Tuple of (sector, month, multiplier)
+            Tuple of (sector, month, multiplier) for the absolute peak.
         """
         best_sector, best_month, best_mult = "", 0, 0.0
         for sector in self.get_sectors(country):
@@ -462,11 +547,15 @@ class AgriculturalCalendar:
         return best_sector, best_month, best_mult
 
     def get_statistics(self) -> Dict[str, int]:
-        """Get calendar statistics."""
+        """Return summary statistics about the loaded calendar registry.
+
+        Used for health checks and logging during service initialisation.
+        """
         countries = self._countries()
         return {
             "total_patterns": len(self.patterns),
             "countries_covered": len(countries),
+            # Sectors per country — useful for coverage gap analysis
             "sectors_per_country": {
                 c: len(self.get_sectors(c)) for c in countries
             },

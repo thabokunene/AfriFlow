@@ -1,0 +1,20 @@
+# =============================================================================
+# @file schema.yml
+# @description Cell network domain dbt schema definitions for mobile network
+#     data models including subscriber behavior, network usage patterns, and
+#     location analytics. Defines data quality tests and privacy-compliant
+#     validation rules for telecommunications data pipelines.
+# @author Thabo Kunene
+# @created 2026-03-18
+# =============================================================================
+
+version: 2
+
+#
+# Cell Domain dbt Schema Definitions
+#
+# We define tests, documentation, and column metadata
+# for all Cell domain models.
+#
+# Disclaimer: This project is not sanctioned by MTN Group.
+#

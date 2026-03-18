@@ -1,0 +1,101 @@
+# =============================================================================
+# @file deploy.yml
+# @description GitHub Actions workflow that deploys AfriFlow to the target
+#              Kubernetes cluster after a successful build on the main branch.
+#              Applies Kubernetes manifests via kubectl, rolling out the new
+#              image tag built by the build.yml workflow. Deployment only runs
+#              on direct pushes to main — never on pull requests.
+# @author Thabo Kunene
+# @created 2026-03-17
+# =============================================================================
+
+name: Deploy to Kubernetes
+
+# ---------------------------------------------------------------------------
+# TRIGGER CONDITIONS
+# Deploy only on direct pushes to main. Pull requests must not trigger
+# deployments to prevent unreviewed code from reaching any environment.
+# ---------------------------------------------------------------------------
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'afriflow/**'                                      # Application code changes trigger deploy
+      - 'afriflow/infrastructure/kubernetes/**'            # Manifest changes also trigger deploy
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # JOB: deploy
+  # Authenticates with the cluster, substitutes the new image tag into the
+  # Kubernetes manifests, and applies them with a rolling update strategy.
+  # ---------------------------------------------------------------------------
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production    # GitHub environment gate — requires manual approval if configured
+
+    steps:
+      # 1. Check out repository to access Kubernetes manifests
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # 2. Authenticate with the container registry so the cluster can pull the new image
+      - name: Log in to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 3. Install kubectl — the Kubernetes CLI used to apply manifests
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'    # Pin to a specific version for reproducibility
+
+      # 4. Write the kubeconfig from a GitHub secret so kubectl can authenticate
+      #    with the cluster. KUBECONFIG_DATA is a base64-encoded kubeconfig file
+      #    stored as a repository secret.
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG_DATA }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config    # Restrict permissions — kubectl warns if world-readable
+
+      # 5. Derive the exact image tag from the commit SHA so the deployment
+      #    references the image built by the accompanying build.yml run.
+      - name: Set image tag environment variable
+        run: echo "IMAGE_TAG=sha-$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_ENV
+
+      # 6. Apply the Kubernetes namespace first to ensure it exists before
+      #    other resources that reference it are created.
+      - name: Apply namespace manifest
+        run: |
+          kubectl apply -f afriflow/infrastructure/kubernetes/base/namespace.yml
+
+      # 7. Apply the full base Kubernetes manifests (Kafka, application deployments, services, etc.)
+      #    kustomize or plain kubectl apply -f is used here depending on the manifest structure.
+      - name: Apply base Kubernetes manifests
+        run: |
+          kubectl apply -f afriflow/infrastructure/kubernetes/base/
+
+      # 8. Update the image tag on the AfriFlow application deployment to the newly built image.
+      #    This triggers a rolling update — old pods are replaced one by one without downtime.
+      - name: Update deployment image
+        run: |
+          kubectl set image deployment/afriflow-app \
+            afriflow-app=ghcr.io/${{ github.repository_owner }}/afriflow:${{ env.IMAGE_TAG }} \
+            --namespace=afriflow
+
+      # 9. Wait for the rolling update to complete. Fails the workflow if any pod
+      #    fails to become ready within the timeout, preventing silent broken deploys.
+      - name: Wait for rollout to complete
+        run: |
+          kubectl rollout status deployment/afriflow-app \
+            --namespace=afriflow \
+            --timeout=300s    # 5-minute timeout for the rollout to stabilise
+
+      # 10. Print the current pod status for visibility in the Actions log.
+      #     Helps quickly identify crashlooping or pending pods after deployment.
+      - name: Verify deployment status
+        run: |
+          kubectl get pods --namespace=afriflow -l app=afriflow-app

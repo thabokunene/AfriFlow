@@ -1,6 +1,17 @@
+-- =============================================================================
+-- @file mart_cross_sell_matrix.sql
+-- @description Materialises the product holdings matrix and Next Best Action
+--     recommendations for every client across all five AfriFlow domains.
+--     Identifies which of the 13 available products each client holds, surfaces
+--     the top 3 cross-sell gaps ranked by estimated revenue opportunity, and
+--     assigns a confidence score to the primary NBA recommendation.
+-- @author Thabo Kunene
+-- @created 2026-03-18
+-- =============================================================================
+
 {{
     config(
-        materialized='table',
+        materialized='table',          -- Full refresh on each dbt run
         tags=['integration', 'cross_sell', 'opportunity']
     )
 }}
@@ -19,10 +30,14 @@
     prioritises the next best product to offer each client.
 */
 
+-- ── CTE: unified_clients ──────────────────────────────────────────────────────
+-- Base: all active golden records with domain presence flags and revenue context
 WITH unified_clients AS (
     SELECT * FROM {{ ref('mart_unified_client') }}
 ),
 
+-- ── CTE: cib_holdings ─────────────────────────────────────────────────────────
+-- Derive boolean product flags for the three core CIB product categories
 -- CIB product holdings
 cib_holdings AS (
     SELECT
@@ -34,6 +49,8 @@ cib_holdings AS (
     GROUP BY golden_id
 ),
 
+-- ── CTE: forex_holdings ───────────────────────────────────────────────────────
+-- Boolean flags for Spot, Forward, and Options FX product holdings
 -- Forex product holdings
 forex_holdings AS (
     SELECT
@@ -45,6 +62,8 @@ forex_holdings AS (
     GROUP BY golden_id
 ),
 
+-- ── CTE: insurance_holdings ───────────────────────────────────────────────────
+-- Boolean flags for Asset, Credit, and Liability insurance product lines
 -- Insurance product holdings
 insurance_holdings AS (
     SELECT
@@ -56,6 +75,8 @@ insurance_holdings AS (
     GROUP BY golden_id
 ),
 
+-- ── CTE: cell_holdings ────────────────────────────────────────────────────────
+-- Boolean flags for Corporate SIM and MoMo product holdings from cell network data
 -- Cell product holdings
 cell_holdings AS (
     SELECT
@@ -66,6 +87,8 @@ cell_holdings AS (
     GROUP BY golden_id
 ),
 
+-- ── CTE: pbb_holdings ─────────────────────────────────────────────────────────
+-- Boolean flags for Payroll and Employee Banking holdings from PBB data
 -- PBB product holdings
 pbb_holdings AS (
     SELECT
@@ -76,6 +99,9 @@ pbb_holdings AS (
     GROUP BY golden_id
 ),
 
+-- ── CTE: combined ─────────────────────────────────────────────────────────────
+-- LEFT JOIN all holdings CTEs onto unified_clients; COALESCE(x, FALSE) ensures
+-- clients missing from a domain default to "does not hold" rather than NULL.
 -- Combine holdings
 combined AS (
     SELECT
@@ -116,12 +142,15 @@ combined AS (
     LEFT JOIN pbb_holdings pbb ON uc.golden_id = pbb.golden_id
 ),
 
+-- ── CTE: with_gaps ────────────────────────────────────────────────────────────
+-- Count products held, compute the gap against the 13-product universe, and
+-- identify which specific gap categories apply to this client.
 -- Calculate product counts and gaps
 with_gaps AS (
     SELECT
         *,
 
-        -- Total products held
+        -- Total products held: sum of all 13 boolean product flags (TRUE = 1, FALSE = 0)
         (
             CASE WHEN has_cib_payments THEN 1 ELSE 0 END +
             CASE WHEN has_cib_trade_finance THEN 1 ELSE 0 END +
@@ -138,10 +167,11 @@ with_gaps AS (
             CASE WHEN has_pbb_employee_banking THEN 1 ELSE 0 END
         ) AS total_products_held,
 
-        -- Total available products
+        -- Total available products in the AfriFlow product universe (constant)
         13 AS total_products_available,
 
-        -- Gap identification
+        -- Gap identification: boolean flags for each major gap category
+        -- gap_fx_hedging: client has unhedged FX exposure but no forward contracts
         NOT has_forex_forwards AND COALESCE(forex_unhedged_value, 0) > 0 AS gap_fx_hedging,
         COALESCE(forex_unhedged_value, 0) AS gap_fx_hedging_value,
         NOT has_insurance_asset AND NOT has_insurance_credit AS gap_insurance_coverage,
@@ -154,15 +184,19 @@ with_gaps AS (
     FROM combined
 ),
 
+-- ── CTE: with_nba ─────────────────────────────────────────────────────────────
+-- Derive product penetration percentage and the top-3 NBA products with estimated
+-- revenue value and confidence scores. Priority order: FX hedging > employee banking
+-- > insurance > trade finance > cash management > general recommendations.
 -- Calculate next best action
 with_nba AS (
     SELECT
         *,
 
-        -- Product penetration
+        -- Product penetration: fraction of the 13-product universe this client uses
         ROUND(total_products_held::NUMERIC / total_products_available::NUMERIC * 100, 2) AS product_penetration_pct,
 
-        -- Next Best Action logic
+        -- NBA product 1: highest-priority gap product for RM conversation
         CASE
             WHEN gap_fx_hedging AND forex_unhedged_value > 1000000 THEN 'FX Forward Hedge'
             WHEN gap_employee_banking AND gap_employee_count > 50 THEN 'PBB Payroll Solution'
@@ -263,14 +297,15 @@ SELECT
     nba_product_3,
     nba_product_3_value,
 
-    -- Total opportunity
+    -- Total opportunity value: aggregate of top-3 NBA product revenue estimates
     (
         COALESCE(nba_product_1_value, 0) +
         COALESCE(nba_product_2_value, 0) +
         COALESCE(nba_product_3_value, 0)
     ) AS total_opportunity_zar,
 
-    -- Cross-sell priority
+    -- Cross-sell priority: sequences RM campaign targeting
+    -- Critical = few products + high-value client = most urgent outreach
     CASE
         WHEN total_products_held <= 3 AND total_relationship_value_zar > 1000000 THEN 'critical'
         WHEN total_products_held <= 5 AND total_relationship_value_zar > 500000 THEN 'high'
@@ -278,9 +313,9 @@ SELECT
         ELSE 'low'
     END AS cross_sell_priority,
 
-    -- Metadata
+    -- Metadata: dbt run ID for lineage; snapshot_date for daily trend tracking
     '{{ invocation_id }}' AS dbt_run_id,
     CURRENT_DATE AS snapshot_date
 
 FROM with_nba
-ORDER BY total_opportunity_zar DESC
+ORDER BY total_opportunity_zar DESC  -- Highest-opportunity clients first for campaign prioritisation

@@ -1,27 +1,25 @@
 """
-Entity Resolution - African Name Normalizer
-
-Multilingual company name normalizer for African
-corporate registries.
-
-We handle French (Francophone West and Central Africa),
-Portuguese (Mozambique, Angola), Arabic transliteration
-(North Africa and parts of East Africa), and English
-naming conventions across 20 African countries.
-
-DISCLAIMER: This project is not a sanctioned initiative
-of Standard Bank Group, MTN, or any affiliated entity.
-It is a demonstration of concept, domain knowledge,
-and data engineering skill by Thabo Kunene.
+@file name_normalizer.py
+@description African Name Normalizer for the AfriFlow entity resolution layer.
+             Normalises company names across multiple African languages and naming
+             conventions to enable accurate entity matching. Handles French entity
+             variations (SARL, GIE, SUCC), Portuguese suffixes (Lda, Ltda, Sociedade),
+             Arabic transliteration prefixes (El-, Al-), accented characters in
+             French and Portuguese, and a registry of known African state-enterprise
+             acronyms (SNEL, NNPC, SONATEL, etc.).
+@author Thabo Kunene
+@created 2026-03-18
 """
 
-import re
-from typing import Dict, List, Optional
-import logging
+import re                           # regex for suffix removal, article normalisation, and cleanup
+from typing import Dict, List, Optional  # full type annotations
+import logging                      # standard library logger (used via AfriFlow wrapper)
 
-from afriflow.exceptions import EntityResolutionError
-from afriflow.logging_config import get_logger
+# AfriFlow internal imports
+from afriflow.exceptions import EntityResolutionError  # raised on normalisation failures
+from afriflow.logging_config import get_logger          # structured logging
 
+# Module-level logger
 logger = get_logger("entity_resolution.normalizer")
 
 
@@ -44,67 +42,85 @@ class AfricanNameNormalizer:
         ACRONYM_REGISTRY: Registry of known acronyms by country
     """
 
+    # Legal entity suffixes to strip during normalisation.
+    # Sorted longest-first at runtime so compound suffixes (e.g. "PTY LTD") match
+    # before simpler ones (e.g. "LTD").
     ENTITY_SUFFIXES: List[str] = [
         "PTY LTD", "(PTY) LTD", "PTY", "PROPRIETARY LIMITED",
         "LTD", "LIMITED", "INC", "INCORPORATED",
         "CORP", "CORPORATION", "PLC",
         "LLC", "GMBH", "AG",
-        "SA", "SARL", "SAS", "SASU",
-        "LDA", "LTDA",
-        "NPC", "SOC LTD", "RF",
-        "BV", "NV",
+        "SA", "SARL", "SAS", "SASU",    # French West Africa entity forms
+        "LDA", "LTDA",                   # Portuguese (Angola, Mozambique)
+        "NPC", "SOC LTD", "RF",          # South African special forms
+        "BV", "NV",                      # Dutch/Belgian (Mauritius holding structures)
     ]
 
+    # Abbreviation → full form expansion map.
+    # Applied after suffix removal so that abbreviations in the company name core
+    # are expanded for better matching consistency.
     ABBREVIATION_MAP: Dict[str, str] = {
-        "STE": "SOCIETE",
-        "SOC": "SOCIEDADE",
-        "ETS": "ETABLISSEMENTS",
-        "CIE": "COMPAGNIE",
-        "GRP": "GROUP",
-        "HLDGS": "HOLDINGS",
-        "INTL": "INTERNATIONAL",
-        "NATL": "NATIONAL",
-        "MTN": "MTN",
-        "STD": "STANDARD",
+        "STE":   "SOCIETE",           # French abbreviation for "Société"
+        "SOC":   "SOCIEDADE",         # Portuguese "Sociedade" (company)
+        "ETS":   "ETABLISSEMENTS",    # French "Établissements" (trading house)
+        "CIE":   "COMPAGNIE",         # French "Compagnie" (company)
+        "GRP":   "GROUP",             # common English abbreviation
+        "HLDGS": "HOLDINGS",          # common English abbreviation
+        "INTL":  "INTERNATIONAL",     # common English abbreviation
+        "NATL":  "NATIONAL",          # common English abbreviation
+        "MTN":   "MTN",               # kept as-is — it is the canonical brand name
+        "STD":   "STANDARD",          # common in South African banking names
     }
 
+    # Known state enterprise acronyms keyed by country code.
+    # These are abbreviations that should resolve to full names for entity matching.
+    # Keyed as {ACRONYM: {COUNTRY_CODE: FULL_NAME}} to handle cross-border ambiguity.
     ACRONYM_REGISTRY: Dict[str, Dict[str, str]] = {
         "SNEL": {
-            "CD": "SOCIETE NATIONALE D ELECTRICITE",
+            "CD": "SOCIETE NATIONALE D ELECTRICITE",  # DRC national electricity utility
         },
         "NNPC": {
-            "NG": "NIGERIAN NATIONAL PETROLEUM CORPORATION",
+            "NG": "NIGERIAN NATIONAL PETROLEUM CORPORATION",  # Nigeria NOC
         },
         "SNCC": {
-            "CD": "SOCIETE NATIONALE DES CHEMINS DE FER DU CONGO",
+            "CD": "SOCIETE NATIONALE DES CHEMINS DE FER DU CONGO",  # DRC national railway
         },
         "SONATEL": {
-            "SN": "SOCIETE NATIONALE DES TELECOMMUNICATIONS",
+            "SN": "SOCIETE NATIONALE DES TELECOMMUNICATIONS",  # Senegal telecoms
         },
         "SONATRACH": {
-            "DZ": "SOCIETE NATIONALE POUR LA RECHERCHE",
+            "DZ": "SOCIETE NATIONALE POUR LA RECHERCHE",  # Algeria NOC
         },
         "ESKOM": {
-            "ZA": "ELECTRICITY SUPPLY COMMISSION",
+            "ZA": "ELECTRICITY SUPPLY COMMISSION",  # South Africa national electricity utility
         },
     }
 
     def __init__(self) -> None:
-        """Initialize the African name normalizer."""
+        """
+        Initialize the African name normalizer.
+
+        No configuration is required at instantiation — all normalisation
+        rules are defined as class-level constants.
+        """
         logger.debug("AfricanNameNormalizer initialized")
 
     def normalize(self, name: str) -> str:
         """
         Normalize a company name for entity matching.
 
-        Removes entity suffixes, expands abbreviations,
-        removes accented characters, and collapses whitespace.
+        Applies the following transformations in order:
+          1. Upper-case and strip whitespace
+          2. Strip Unicode accents (e.g. é → E)
+          3. Remove entity type suffixes (e.g. PTY LTD, SARL)
+          4. Expand abbreviations (e.g. STE → SOCIETE)
+          5. Normalise Arabic article prefixes (El- / Al- → EL)
+          6. Remove non-alphanumeric special characters
+          7. Collapse multiple whitespace to a single space
 
-        Args:
-            name: Raw company name to normalize
-
-        Returns:
-            Normalized company name (uppercase, no suffixes)
+        :param name: Raw company name to normalize.
+        :return: Normalized company name (uppercase, no suffixes or accents).
+        :raises EntityResolutionError: If normalisation raises an unexpected exception.
 
         Example:
             >>> normalizer = AfricanNameNormalizer()
@@ -119,12 +135,12 @@ class AfricanNameNormalizer:
             result = name.upper().strip()
             logger.debug(f"Normalizing: '{name}' -> '{result}'")
 
-            result = self._strip_accents(result)
-            result = self._remove_entity_suffixes(result)
-            result = self._expand_abbreviations(result)
-            result = self._normalize_arabic_articles(result)
-            result = self._remove_special_characters(result)
-            result = self._collapse_whitespace(result)
+            result = self._strip_accents(result)           # step 1: remove diacritics
+            result = self._remove_entity_suffixes(result)  # step 2: strip legal form
+            result = self._expand_abbreviations(result)    # step 3: expand abbreviations
+            result = self._normalize_arabic_articles(result)  # step 4: normalise AL-/EL-
+            result = self._remove_special_characters(result)  # step 5: keep alphanum + space
+            result = self._collapse_whitespace(result)     # step 6: normalise whitespace
 
             logger.debug(f"Normalized result: '{result}'")
             return result
@@ -138,27 +154,28 @@ class AfricanNameNormalizer:
 
     def _strip_accents(self, text: str) -> str:
         """
-        Remove accented characters by mapping to ASCII equivalents.
+        Remove accented characters by mapping to their ASCII equivalents.
 
-        Args:
-            text: Text with potential accented characters
+        Covers the full set of accented Latin characters used in French
+        and Portuguese corporate names (A-Z with accents).
 
-        Returns:
-            Text with accents removed
+        :param text: Upper-cased text with potential accented characters.
+        :return: Text with all accented characters replaced by their base ASCII form.
         """
+        # Explicit character-by-character replacement map (covers FR and PT accents)
         replacements: Dict[str, str] = {
-            "\u00c0": "A", "\u00c1": "A", "\u00c2": "A",
-            "\u00c3": "A", "\u00c4": "A", "\u00c5": "A",
-            "\u00c8": "E", "\u00c9": "E", "\u00ca": "E",
-            "\u00cb": "E",
-            "\u00cc": "I", "\u00cd": "I", "\u00ce": "I",
-            "\u00cf": "I",
-            "\u00d2": "O", "\u00d3": "O", "\u00d4": "O",
-            "\u00d5": "O", "\u00d6": "O",
-            "\u00d9": "U", "\u00da": "U", "\u00db": "U",
-            "\u00dc": "U",
-            "\u00c7": "C",
-            "\u00e0": "A", "\u00e1": "A", "\u00e2": "A",
+            "\u00c0": "A", "\u00c1": "A", "\u00c2": "A",  # À Á Â
+            "\u00c3": "A", "\u00c4": "A", "\u00c5": "A",  # Ã Ä Å
+            "\u00c8": "E", "\u00c9": "E", "\u00ca": "E",  # È É Ê
+            "\u00cb": "E",                                 # Ë
+            "\u00cc": "I", "\u00cd": "I", "\u00ce": "I",  # Ì Í Î
+            "\u00cf": "I",                                 # Ï
+            "\u00d2": "O", "\u00d3": "O", "\u00d4": "O",  # Ò Ó Ô
+            "\u00d5": "O", "\u00d6": "O",                 # Õ Ö
+            "\u00d9": "U", "\u00da": "U", "\u00db": "U",  # Ù Ú Û
+            "\u00dc": "U",                                 # Ü
+            "\u00c7": "C",                                 # Ç
+            "\u00e0": "A", "\u00e1": "A", "\u00e2": "A",  # à á â (lowercase versions)
             "\u00e3": "A", "\u00e4": "A", "\u00e5": "A",
             "\u00e8": "E", "\u00e9": "E", "\u00ea": "E",
             "\u00eb": "E",
@@ -168,7 +185,7 @@ class AfricanNameNormalizer:
             "\u00f5": "O", "\u00f6": "O",
             "\u00f9": "U", "\u00fa": "U", "\u00fb": "U",
             "\u00fc": "U",
-            "\u00e7": "C",
+            "\u00e7": "C",                                 # ç (cedilla)
         }
         for accented, replacement in replacements.items():
             text = text.replace(accented, replacement)
@@ -176,29 +193,27 @@ class AfricanNameNormalizer:
 
     def _remove_entity_suffixes(self, text: str) -> str:
         """
-        Remove entity type suffixes from company name.
+        Remove entity type suffixes from a company name.
 
-        Args:
-            text: Company name with potential suffixes
+        Iterates suffixes in reverse length order (longest first) to ensure
+        compound suffixes like "PTY LTD" are matched before simpler "LTD".
 
-        Returns:
-            Company name with suffixes removed
+        :param text: Upper-cased company name with potential legal form suffix.
+        :return: Company name with entity suffixes removed.
         """
+        # Sort longest-first here to ensure greedy matching of compound suffixes
         for suffix in sorted(self.ENTITY_SUFFIXES, key=len, reverse=True):
             pattern = r"\b" + re.escape(suffix) + r"\b"
             text = re.sub(pattern, "", text)
-            text = text.replace(f"({suffix})", "")
+            text = text.replace(f"({suffix})", "")  # also handle parenthesised forms
         return text
 
     def _expand_abbreviations(self, text: str) -> str:
         """
-        Expand common abbreviations to full forms.
+        Expand common abbreviations to their full forms.
 
-        Args:
-            text: Text with potential abbreviations
-
-        Returns:
-            Text with abbreviations expanded
+        :param text: Upper-cased company name after suffix removal.
+        :return: Text with abbreviations expanded to full forms.
         """
         for abbrev, full in self.ABBREVIATION_MAP.items():
             pattern = r"\b" + re.escape(abbrev) + r"\b"
@@ -207,41 +222,38 @@ class AfricanNameNormalizer:
 
     def _normalize_arabic_articles(self, text: str) -> str:
         """
-        Normalize Arabic article prefixes (El-, Al-, El) to standard form.
+        Normalise Arabic article prefixes (El-, Al-, El) to a standard 'EL' form.
 
-        Args:
-            text: Text with potential Arabic articles
+        Both AL-X and EL-X variants are normalised to EL to prevent duplicates
+        (e.g. "Al-Ameen Bank" and "El-Ameen Bank" should match).
 
-        Returns:
-            Text with articles normalized to 'EL'
+        :param text: Upper-cased company name.
+        :return: Text with Arabic articles normalised to 'EL'.
         """
-        text = re.sub(r"\bEL[\s\-]+", "EL", text)
-        text = re.sub(r"\bAL[\s\-]+", "EL", text)
+        text = re.sub(r"\bEL[\s\-]+", "EL", text)  # EL- or EL  → EL
+        text = re.sub(r"\bAL[\s\-]+", "EL", text)  # AL- or AL  → EL (unified form)
         return text
 
     def _remove_special_characters(self, text: str) -> str:
         """
-        Remove special characters except alphanumeric and whitespace.
+        Remove special characters, keeping only alphanumeric characters and spaces.
 
-        Args:
-            text: Text with potential special characters
+        Also handles the French genitive apostrophe pattern "D'" (e.g. "d'Electricite")
+        which produces "D " after apostrophe removal — collapsed to "D".
 
-        Returns:
-            Text with special characters removed
+        :param text: Text after abbreviation expansion.
+        :return: Text with special characters removed.
         """
-        text = re.sub(r"[^A-Z0-9\s]", "", text)
-        text = re.sub(r"\bD\s+", "D", text)
+        text = re.sub(r"[^A-Z0-9\s]", "", text)  # keep only A-Z, 0-9, and spaces
+        text = re.sub(r"\bD\s+", "D", text)        # collapse "D " → "D" (French genitive)
         return text
 
     def _collapse_whitespace(self, text: str) -> str:
         """
-        Collapse multiple whitespace to single space and trim.
+        Collapse multiple consecutive whitespace characters to a single space and trim.
 
-        Args:
-            text: Text with potential extra whitespace
-
-        Returns:
-            Text with normalized whitespace
+        :param text: Text after special character removal.
+        :return: Whitespace-normalised string.
         """
         return re.sub(r"\s+", " ", text).strip()
 
@@ -251,51 +263,49 @@ class AfricanNameNormalizer:
         country_code: str
     ) -> Optional[str]:
         """
-        Resolve a known corporate acronym to its full name.
+        Resolve a known corporate acronym to its full legal name.
 
-        Args:
-            acronym: Acronym to resolve (e.g., 'SNEL', 'NNPC')
-            country_code: ISO 3166-1 alpha-2 country code
-
-        Returns:
-            Full company name if found, None otherwise
+        :param acronym: Acronym to resolve (e.g. 'SNEL', 'NNPC').
+        :param country_code: ISO 3166-1 alpha-2 country code to disambiguate
+                             acronyms that appear in multiple countries.
+        :return: Full company name string if found, None otherwise.
 
         Example:
             >>> normalizer = AfricanNameNormalizer()
             >>> normalizer.resolve_acronym("NNPC", "NG")
             'NIGERIAN NATIONAL PETROLEUM CORPORATION'
         """
+        # Guard against None or non-string input
         if not acronym or not isinstance(acronym, str):
             return None
 
         acronym_upper = acronym.upper().strip()
 
         if acronym_upper in self.ACRONYM_REGISTRY:
+            # Look up the full name for the given country code
             country_map = self.ACRONYM_REGISTRY[acronym_upper]
             result = country_map.get(country_code.upper())
             if result:
                 logger.debug(
                     f"Resolved acronym {acronym} ({country_code}) -> {result}"
                 )
-            return result
+            return result  # None if country_code not in registry for this acronym
 
         logger.debug(f"Unknown acronym: {acronym} ({country_code})")
-        return None
+        return None  # acronym not in registry
 
     def get_supported_suffixes(self) -> List[str]:
         """
-        Get list of supported entity suffixes.
+        Get a copy of the list of supported entity suffixes.
 
-        Returns:
-            List of entity suffixes that will be removed
+        :return: List of entity suffix strings that will be stripped during normalisation.
         """
         return self.ENTITY_SUFFIXES.copy()
 
     def get_supported_abbreviations(self) -> Dict[str, str]:
         """
-        Get mapping of supported abbreviations.
+        Get a copy of the supported abbreviation expansion mapping.
 
-        Returns:
-            Dictionary of abbreviation to full form
+        :return: Dict of abbreviation → full form.
         """
         return self.ABBREVIATION_MAP.copy()

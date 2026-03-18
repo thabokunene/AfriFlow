@@ -1,3 +1,7 @@
+# @file southern_africa_agriculture.yml
+# @description Seasonal calendars driving domain signal seasonality adjustments
+# @author Thabo Kunene
+# @created 2026-03-17
 # config/seasonal_calendars/southern_africa_agriculture.yml
 
 # Seasonal calendar for Southern African agricultural cycles.
@@ -5,73 +9,83 @@
 # DISCLAIMER: This project is not sanctioned by, affiliated with, or
 # endorsed by Standard Bank Group, MTN Group, or any of their subsidiaries.
 
+# Regional scope: Southern African Development Community (SADC) focus
+# These countries represent the primary agricultural economies where seasonal patterns
+# significantly impact FX flows and CIB (Customer Interaction Banking) metrics
 region: southern_africa
-countries: [ZA, MZ, ZM, ZW, MW, BW]
+countries: [ZA, MZ, ZM, ZW, MW, BW]  # South Africa, Mozambique, Zambia, Zimbabwe, Malawi, Botswana
 
+# Seasonal configurations drive domain signal adjustments to prevent false positives
+# Each crop cycle affects banking patterns through cash flow timing and FX demand
 seasons:
+  # Maize: Primary staple crop across Southern Africa, drives significant seasonal FX patterns
   maize:
     planting:
-      start_month: 10
-      end_month: 12
-      cash_flow_impact: negative
-      expected_cib_change_pct: -25
-      expected_fx_demand: USD_buy
-      notes: "Input purchase period. Fertilizer and seed imports peak."
+      start_month: 10  # October - start of rainy season preparation
+      end_month: 12    # December - peak planting window
+      cash_flow_impact: negative  # Farmers purchase inputs, reducing account balances
+      expected_cib_change_pct: -25  # Expected 25% decrease in Customer Interaction Banking metrics
+      expected_fx_demand: USD_buy  # Need USD for imported fertilizers/seeds
+      notes: "Input purchase period. Fertilizer and seed imports peak."  # Critical for FX hedging strategies
 
     growing:
-      start_month: 1
-      end_month: 3
-      cash_flow_impact: neutral
-      expected_cib_change_pct: -40
-      expected_fx_demand: minimal
-      notes: "Low activity period. False attrition signals likely."
+      start_month: 1   # January - crops established, minimal activity
+      end_month: 3     # March - pre-harvest maintenance phase
+      cash_flow_impact: neutral  # Limited financial activity, accounts stabilize
+      expected_cib_change_pct: -40  # Still below baseline due to reduced transactions
+      expected_fx_demand: minimal  # Natural rainfall reduces irrigation needs
+      notes: "Low activity period. False attrition signals likely."  # Alert: Don't flag as customer churn
 
     harvest:
-      start_month: 4
-      end_month: 6
-      cash_flow_impact: positive
-      expected_cib_change_pct: 60
-      expected_fx_demand: USD_sell
-      notes: "Export revenue peak. FX conversion and hedging demand high."
+      start_month: 4   # April - early harvest begins
+      end_month: 6     # June - peak harvest and marketing
+      cash_flow_impact: positive  # Farmers receive payments for crop sales
+      expected_cib_change_pct: 60  # 60% increase in banking activity
+      expected_fx_demand: USD_sell  # Convert local currency to USD for imports
+      notes: "Export revenue peak. FX conversion and hedging demand high."  # Key period for FX risk management
 
     marketing:
-      start_month: 7
-      end_month: 9
-      cash_flow_impact: positive_declining
-      expected_cib_change_pct: 20
-      expected_fx_demand: mixed
-      notes: "Stored crop sales. Gradual decline in activity."
+      start_month: 7   # July - post-harvest storage sales
+      end_month: 9     # September - preparation for next season
+      cash_flow_impact: positive_declining  # Gradual reduction from peak levels
+      expected_cib_change_pct: 20  # Still elevated but declining from harvest peak
+      expected_fx_demand: mixed  # Some selling, some holding for better prices
+      notes: "Stored crop sales. Gradual decline in activity."  # Monitor for price speculation patterns
 
+  # Sugar: Mozambique-specific export crop with distinct seasonal patterns
+  # Sugar production drives significant USD inflows through export revenues
   sugar_mozambique:
     crushing:
-      start_month: 6
-      end_month: 11
-      cash_flow_impact: positive
-      expected_cib_change_pct: 80
-      expected_fx_demand: USD_sell
-      notes: "Sugar export revenue. MZN/USD corridor active."
+      start_month: 6   # June - sugar cane harvesting begins
+      end_month: 11    # November - peak processing and export period
+      cash_flow_impact: positive  # Major export revenue generation
+      expected_cib_change_pct: 80  # Highest banking activity increase (80%)
+      expected_fx_demand: USD_sell  # Convert MZN to USD for trade settlement
+      notes: "Sugar export revenue. MZN/USD corridor active."  # Critical for Mozambique FX reserves
 
     off_season:
-      start_month: 12
-      end_month: 5
-      cash_flow_impact: negative
-      expected_cib_change_pct: -50
-      expected_fx_demand: USD_buy
-      notes: "Equipment import and maintenance. Low export revenue."
+      start_month: 12  # December - factory maintenance and equipment procurement
+      end_month: 5     # May - pre-harvest preparation phase
+      cash_flow_impact: negative  # Equipment purchases and maintenance costs
+      expected_cib_change_pct: -50  # Significant reduction in banking activity (50%)
+      expected_fx_demand: USD_buy  # Import USD-denominated machinery and parts
+      notes: "Equipment import and maintenance. Low export revenue."  # Monitor for FX reserve depletion
 
+  # Tobacco: Zimbabwe's primary export crop, critical for FX generation
+  # Tobacco auctions create significant seasonal USD inflows supporting ZWL stability
   tobacco_zimbabwe:
     auction:
-      start_month: 3
-      end_month: 8
-      cash_flow_impact: positive
-      expected_cib_change_pct: 70
-      expected_fx_demand: USD_sell
-      notes: "Tobacco auction season. Major USD inflow period."
+      start_month: 3   # March - tobacco marketing season begins
+      end_month: 8     # August - peak auction period
+      cash_flow_impact: positive  # Major foreign currency earnings
+      expected_cib_change_pct: 70  # Substantial banking activity increase (70%)
+      expected_fx_demand: USD_sell  # Convert USD earnings to local currency needs
+      notes: "Tobacco auction season. Major USD inflow period."  # Critical for Zimbabwe FX stability
 
     off_season:
-      start_month: 9
-      end_month: 2
-      cash_flow_impact: negative
-      expected_cib_change_pct: -35
-      expected_fx_demand: USD_buy
-      notes: "Input procurement. Minimal export revenue."
+      start_month: 9   # September - post-auction, pre-planting preparation
+      end_month: 2     # February - input procurement and field preparation
+      cash_flow_impact: negative  # Farmers purchase seeds, fertilizers, and equipment
+      expected_cib_change_pct: -35  # Moderate reduction in banking activity (35%)
+      expected_fx_demand: USD_buy  # Import agricultural inputs and chemicals
+      notes: "Input procurement. Minimal export revenue."  # Monitor for seasonal FX pressure

@@ -1,4 +1,11 @@
 """
+@file hedge_gap_detector.py
+@description Detects hedge-exposure mismatches and classifies severity with RBAC safeguards
+@author Thabo Kunene
+@created 2026-03-17
+"""
+
+"""
 Hedge Gap Detector (Forex, Flink-style).
 
 We detect gaps between hedge instruments and their
@@ -11,13 +18,13 @@ This processor implements security-hardened validation
 with RBAC and structured logging.
 """
 
-import logging
+import logging  # Operational logging for configuration, validation, and analysis outcomes
 from typing import Any, Dict, Optional
 
-from afriflow.domains.shared.interfaces import BaseProcessor
-from afriflow.domains.shared.config import get_config
+from afriflow.domains.shared.interfaces import BaseProcessor  # Minimal processing interface
+from afriflow.domains.shared.config import get_config  # Environment-aware configuration for RBAC
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)  # Module-level logger for this processor
 
 
 class Processor(BaseProcessor):

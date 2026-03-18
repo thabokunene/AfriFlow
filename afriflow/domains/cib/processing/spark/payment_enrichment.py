@@ -1,15 +1,22 @@
 """
+@file payment_enrichment.py
+@description Payment enrichment processor stub with RBAC validation and safe no-op processing
+@author Thabo Kunene
+@created 2026-03-17
+"""
+
+"""
 Payment Enrichment (CIB, Spark-style).
 
 We add a minimal, security-hardened Processor stub that acts as a validated
 pass-through; concrete Spark enrichment can build atop this skeleton.
 """
 
-import logging
+import logging  # Operational logger for RBAC, validation, and processing outcomes
 from typing import Any, Dict
 
-from afriflow.domains.shared.interfaces import BaseProcessor
-from afriflow.domains.shared.config import get_config
+from afriflow.domains.shared.interfaces import BaseProcessor  # Shared processing contract
+from afriflow.domains.shared.config import get_config  # Environment-aware config for RBAC
 
 
 class Processor(BaseProcessor):

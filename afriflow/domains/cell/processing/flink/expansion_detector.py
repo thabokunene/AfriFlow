@@ -1,4 +1,11 @@
 """
+@file expansion_detector.py
+@description Detects geographic client expansion by analyzing SIM activations across countries
+@author Thabo Kunene
+@created 2026-03-17
+"""
+
+"""
 Cell Expansion Detector.
 
 We detect geographic expansion by analyzing SIM
@@ -17,9 +24,12 @@ from datetime import datetime, timedelta, timezone
 import logging
 from collections import defaultdict
 
+# BaseProcessor defines the minimal processing interface used across domains
 from afriflow.domains.shared.interfaces import BaseProcessor
+# get_config loads environment-aware settings to enforce RBAC and limits
 from afriflow.domains.shared.config import get_config
 
+# Module-level logger for structured operational events and incident context
 logger = logging.getLogger(__name__)
 
 
@@ -241,13 +251,30 @@ class ExpansionDetector:
 
 
 class Processor(BaseProcessor):
+    """
+    Minimal processor wrapper enforcing environment-aware RBAC, input size limits,
+    and structured error logging. Used for synchronous processing paths.
+    """
     def configure(self, config=None) -> None:
+        """
+        Configure RBAC and size limits based on environment.
+        Notes:
+        - In staging/prod, restrict to system/service to prevent analyst misuse.
+        - Max record size guards against runaway payloads or log flooding.
+        """
         self.logger = logging.getLogger(__name__)
         env = (self.config.env if self.config else get_config().env)
         self._allowed_roles = {"system", "service"} if env in {"staging", "prod"} else {"system", "service", "analyst"}
         self._max_record_size = 100_000
 
     def validate(self, record) -> None:
+        """
+        Validate record type, required fields, and RBAC authorization.
+        Raises:
+        - TypeError when payload is not dict-like
+        - PermissionError for unauthorized roles
+        - ValueError for missing source or oversized payload
+        """
         if not isinstance(record, dict):
             raise TypeError("record must be a dict")
         role = record.get("access_role")
@@ -260,6 +287,12 @@ class Processor(BaseProcessor):
             raise ValueError("record too large")
 
     def process_sync(self, record):
+        """
+        Synchronous processing wrapper with error logging and re-raise behavior.
+        Returns a shallow copy with a 'processed' marker on success.
+        Edge cases:
+        - Any validation failure is logged with structured context and re-raised.
+        """
         try:
             self.validate(record)
             out = dict(record)

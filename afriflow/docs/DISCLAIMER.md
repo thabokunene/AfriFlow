@@ -1,3 +1,9 @@
+<!--
+@file DISCLAIMER.md
+@description Portfolio disclaimer describing scope and non-affiliation with institutions
+@author Thabo Kunene
+@created 2026-03-17
+-->
 # Disclaimer
 
 This project is not sanctioned by, affiliated with, or

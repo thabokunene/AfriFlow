@@ -1,3 +1,9 @@
+<!--
+@file COST_MODEL.md
+@description Cost model assumptions and phased rollout plan for AfriFlow implementation
+@author Thabo Kunene
+@created 2026-03-17
+-->
 <!-- docs/COST_MODEL.md -->
 
 # AfriFlow Cost Model and Phased Rollout

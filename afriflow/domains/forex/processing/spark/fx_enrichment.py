@@ -1,4 +1,11 @@
 """
+@file fx_enrichment.py
+@description Enriches FX trades with segmentation, risk weights, regulatory flags, and P&L basics
+@author Thabo Kunene
+@created 2026-03-17
+"""
+
+"""
 FX Enrichment (Forex, Spark-style).
 
 We enrich FX trade records with:

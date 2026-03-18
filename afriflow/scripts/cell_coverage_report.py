@@ -110,10 +110,18 @@ def pct(covered: int, total: int) -> float:
 
 
 def file_for_reading(filename: str) -> str | None:
-    if os.path.exists(filename):
-        return filename
-    if os.path.exists(os.path.join(os.getcwd(), filename)):
-        return os.path.join(os.getcwd(), filename)
+    # coverage.xml paths are relative to the domains/ source root, so the actual
+    # filesystem path (relative to the afriflow/ working directory) needs the
+    # domains/ prefix prepended.
+    candidates = [
+        filename,
+        os.path.join(os.getcwd(), filename),
+        os.path.join("domains", filename),
+        os.path.join(os.getcwd(), "domains", filename),
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
     return None
 
 
@@ -184,7 +192,15 @@ def main() -> int:
 
         readable = file_for_reading(filename)
         funcs = parse_functions(readable) if readable else []
-        executed = executed_by_file.get(normalize(filename), set())
+        # coverage.json paths use the full afriflow/ root (e.g. domains/forex/...),
+        # while coverage.xml paths are relative to afriflow/domains/ (e.g. forex/...).
+        # Try both forms so function-covered counts are correct.
+        norm_fn = normalize(filename)
+        executed = (
+            executed_by_file.get(norm_fn)
+            or executed_by_file.get("domains/" + norm_fn)
+            or set()
+        )
         func_covered = 0
         for start, end in funcs:
             if any((start <= ln <= end) for ln in executed):
@@ -211,7 +227,14 @@ def main() -> int:
         row["branch_str"] = (
             f"{branch_pct:.1f}% ({cov['branches_covered']}/{cov['branches_valid']})"
             if cov["branches_valid"] > 0
-            else "n/a"
+            else (
+                # pytest-cov emits only branch-rate (a ratio) on <class> elements,
+                # not branches-valid / branches-covered counts.  Display the rate
+                # so the column is never silently blank.
+                f"{branch_pct:.1f}%"
+                if cov.get("branch_rate") is not None
+                else "n/a"
+            )
         )
         row["func_str"] = f"{func_pct:.1f}% ({func_covered}/{len(funcs)})"
 
@@ -219,7 +242,12 @@ def main() -> int:
 
         if line_pct + 1e-9 < args.line_min:
             failures.append(f"{filename} line {line_pct:.1f}% < {args.line_min:.1f}%")
-        if cov["branches_valid"] > 0 and branch_pct + 1e-9 < args.branch_min:
+        # Enforce branch gate when branch data is available from either count
+        # attributes (branches_valid > 0) or the rate attribute (branch_rate).
+        # Previously the gate was silently skipped whenever branches_valid == 0,
+        # which always happened with pytest-cov's Cobertura output format.
+        has_branch_data = cov["branches_valid"] > 0 or cov.get("branch_rate") is not None
+        if has_branch_data and args.branch_min > 0 and branch_pct + 1e-9 < args.branch_min:
             failures.append(f"{filename} branch {branch_pct:.1f}% < {args.branch_min:.1f}%")
         if len(funcs) > 0 and func_pct + 1e-9 < args.func_min:
             failures.append(f"{filename} func {func_pct:.1f}% < {args.func_min:.1f}%")
@@ -235,7 +263,7 @@ def main() -> int:
 
     if args.github_summary:
         with open(args.github_summary, "a", encoding="utf-8") as f:
-            f.write("\n## Cell Domain Coverage (Per Module)\n\n")
+            f.write(f"\n## Coverage Report: {args.include_subpath} (Per Module)\n\n")
             f.write(md)
 
     if failures:

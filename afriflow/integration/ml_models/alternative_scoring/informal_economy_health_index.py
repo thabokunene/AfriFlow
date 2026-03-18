@@ -1,36 +1,16 @@
 """
-Informal Economy Health Index (IEHI)
-
-The informal economy represents 30–60% of GDP across most
-sub-Saharan African countries. Standard banking products
-were designed for the formal sector — they miss this segment
-entirely.
-
-The IEHI scores the health and growth trajectory of the
-informal economy cluster served by a corporate client,
-using MoMo flows as the primary signal.
-
-Key insight: A large employer's informal workforce (traders,
-contractors, informal suppliers) transacts primarily through
-MoMo. The volume, frequency, and geography of these flows
-reveal the health of the informal cluster around the client —
-which in turn predicts:
-  - Future formal sector conversion (bankarisation rate)
-  - SME lending opportunity in the supplier chain
-  - Insurance micro-product demand
-  - Cross-border corridor expansion
-
-IEHI Components:
-  1. MoMo velocity         — frequency of informal transactions
-  2. Informal payroll reach — % of workforce paid informally
-  3. Geographic spread      — informal activity in new markets
-  4. Seasonal resilience    — activity maintained during lean seasons
-  5. Formalisation signal  — informal clients opening bank accounts
-
-Output: IEHI 0–100 per cluster + trajectory (GROWING/STABLE/DECLINING)
-
-Disclaimer: Portfolio project by Thabo Kunene. Not a
-Standard Bank Group product. All data is simulated.
+@file informal_economy_health_index.py
+@description Computes the Informal Economy Health Index (IEHI) — a 0–100 score
+             measuring the health and growth trajectory of the informal economy
+             cluster surrounding a corporate AfriFlow client.
+             The informal economy is 30–60% of GDP across most sub-Saharan
+             African countries. MoMo transaction flows are the primary signal
+             because they capture economic activity that is invisible to
+             traditional banking data systems.
+             Output: IEHI score + GROWING / STABLE / DECLINING trajectory +
+             an opportunity summary for the relationship manager.
+@author Thabo Kunene
+@created 2026-03-18
 """
 
 from __future__ import annotations
@@ -40,22 +20,41 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 
+# ---------------------------------------------------------------------------
+# Component weights
+# ---------------------------------------------------------------------------
+# MoMo velocity dominates (0.30) because transaction frequency is the most
+# direct proxy for economic activity in the informal sector.
+
 _COMPONENT_WEIGHTS: Dict[str, float] = {
-    "momo_velocity":        0.30,
-    "informal_payroll":     0.25,
-    "geographic_spread":    0.20,
-    "seasonal_resilience":  0.15,
-    "formalisation_signal": 0.10,
+    "momo_velocity":        0.30,  # Frequency of informal MoMo transactions
+    "informal_payroll":     0.25,  # Reach of MoMo payroll across informal workers
+    "geographic_spread":    0.20,  # Number of active MoMo corridors
+    "seasonal_resilience":  0.15,  # Volume stability across lean seasons
+    "formalisation_signal": 0.10,  # New bank account openings from informal cluster
 }
 
-# Trajectory thresholds (3-month change in IEHI)
+# Trajectory thresholds: change in IEHI score over the prior period.
+# A delta >= +5 is a meaningful positive trend; <= -5 is a meaningful decline.
 _TRAJECTORY_GROWING  = +5.0
 _TRAJECTORY_DECLINING = -5.0
 
 
+# ---------------------------------------------------------------------------
+# Data contracts
+# ---------------------------------------------------------------------------
+
 @dataclass
 class IEHIComponent:
-    """One component of the Informal Economy Health Index."""
+    """
+    One component of the Informal Economy Health Index.
+
+    :param name:         Component key (matches _COMPONENT_WEIGHTS).
+    :param score:        Component score 0–100.
+    :param weight:       Fractional weight in composite.
+    :param description:  Evidence summary.
+    :param data_present: False if source domain data was unavailable.
+    """
 
     name: str
     score: float         # 0–100
@@ -66,7 +65,19 @@ class IEHIComponent:
 
 @dataclass
 class InformalClusterProfile:
-    """Profile of the informal cluster around a corporate client."""
+    """
+    Profile of the informal economic cluster surrounding a corporate client.
+
+    Derived from the gap between total SIM-estimated headcount and the
+    number of formal PBB payroll accounts — the difference approximates
+    the informal workforce size.
+
+    :param estimated_informal_headcount:       Informal workers (not banked).
+    :param estimated_monthly_momo_volume_zar:  Total MoMo throughput per month.
+    :param active_momo_corridors:              Country codes with active MoMo flows.
+    :param avg_transaction_value_zar:          Mean per-transaction size in ZAR.
+    :param momo_enabled_pct:                   Fraction of workforce with MoMo wallet.
+    """
 
     estimated_informal_headcount: int
     estimated_monthly_momo_volume_zar: float
@@ -78,16 +89,26 @@ class InformalClusterProfile:
 @dataclass
 class IEHIResult:
     """
-    Informal Economy Health Index result for a client cluster.
+    Full Informal Economy Health Index result for a client cluster.
 
     iehi_score : 0–100, higher = healthier informal cluster
-    trajectory : GROWING / STABLE / DECLINING
+    trajectory : GROWING / STABLE / DECLINING (vs prior period)
+
+    :param client_golden_id:    AfriFlow golden record identifier.
+    :param iehi_score:          Composite IEHI score (0–100).
+    :param trajectory:          Directional trend vs prior period.
+    :param trajectory_delta:    Absolute change in IEHI vs prior score.
+    :param informal_cluster:    Cluster profile derived from domain data.
+    :param components:          Per-component score breakdown.
+    :param data_completeness:   Fraction of domain weights covered by data.
+    :param opportunity_summary: RM-facing plain-English opportunity text.
+    :param scored_at:           ISO timestamp of scoring.
     """
 
     client_golden_id: str
     iehi_score: float
     trajectory: str
-    trajectory_delta: float     # 3-month change in IEHI
+    trajectory_delta: float     # 3-month change in IEHI; 0.0 if no prior score
     informal_cluster: InformalClusterProfile
     components: List[IEHIComponent]
     data_completeness: float
@@ -97,10 +118,14 @@ class IEHIResult:
     )
 
 
+# ---------------------------------------------------------------------------
+# Indexer
+# ---------------------------------------------------------------------------
+
 class InformalEconomyHealthIndexer:
     """
-    Compute the Informal Economy Health Index for the informal
-    cluster surrounding a corporate AfriFlow client.
+    Compute the Informal Economy Health Index for the informal cluster
+    surrounding a corporate AfriFlow client.
 
     Usage::
 
@@ -126,11 +151,25 @@ class InformalEconomyHealthIndexer:
         prior_iehi_score: Optional[float] = None,
         country: str = "ZA",
     ) -> IEHIResult:
+        """
+        Compute IEHI for one client.
+
+        :param golden_record:    Mandatory golden record dict.
+        :param cell_profile:     Cell/MoMo domain profile (primary signal source).
+        :param pbb_profile:      PBB profile (for formal payroll account count).
+        :param cib_profile:      CIB profile (reserved for future corridor signals).
+        :param prior_iehi_score: Previous IEHI score for trajectory calculation.
+        :param country:          ISO-2 country code for contextual adjustments.
+        :return:                 IEHIResult dataclass.
+        """
         client_id = golden_record.get("golden_id", "UNKNOWN")
 
+        # Build the informal cluster profile from cell + PBB headcount gap
         cluster = self._build_cluster_profile(
             cell_profile, pbb_profile
         )
+
+        # Score each IEHI component
         components = [
             self._score_momo_velocity(cell_profile, cluster),
             self._score_informal_payroll(cell_profile, pbb_profile, cluster),
@@ -139,8 +178,10 @@ class InformalEconomyHealthIndexer:
             self._score_formalisation(cell_profile, pbb_profile),
         ]
 
+        # Weighted composite over present components only
         present = [c for c in components if c.data_present]
         if not present:
+            # No cell data at all — assign a conservative low score
             iehi = 25.0
             completeness = 0.0
         else:
@@ -148,17 +189,18 @@ class InformalEconomyHealthIndexer:
             completeness = present_weight
             iehi = sum(
                 c.score * c.weight for c in present
-            ) / present_weight
+            ) / present_weight  # Re-normalise over present components
 
-        # Trajectory
+        # Compute trajectory: compare current IEHI to prior period
         delta = (iehi - prior_iehi_score) if prior_iehi_score is not None else 0.0
         if delta >= _TRAJECTORY_GROWING:
             trajectory = "GROWING"
         elif delta <= _TRAJECTORY_DECLINING:
             trajectory = "DECLINING"
         else:
-            trajectory = "STABLE"
+            trajectory = "STABLE"  # Within ±5 IEHI points — no clear trend
 
+        # Generate a plain-English opportunity summary for the RM
         opportunity = self._opportunity_summary(iehi, trajectory, cluster)
 
         return IEHIResult(
@@ -181,7 +223,16 @@ class InformalEconomyHealthIndexer:
         cell: Optional[Dict],
         pbb: Optional[Dict],
     ) -> InformalClusterProfile:
+        """
+        Build a profile of the informal worker cluster from the gap between
+        total SIM-estimated employee count and formal PBB payroll accounts.
+
+        :param cell: Cell profile dict.
+        :param pbb:  PBB profile dict.
+        :return:     InformalClusterProfile dataclass.
+        """
         if not cell:
+            # No cell data — return an empty cluster profile
             return InformalClusterProfile(
                 estimated_informal_headcount=0,
                 estimated_monthly_momo_volume_zar=0.0,
@@ -190,17 +241,27 @@ class InformalEconomyHealthIndexer:
                 momo_enabled_pct=0.0,
             )
 
+        # Total headcount from SIM deflation model (cell domain)
         total_employees = cell.get("estimated_employee_count", 0)
+
+        # Number of employees with formal PBB payroll accounts
         bank_employees = (pbb or {}).get("payroll_account_count", 0)
+
+        # Informal headcount: those without a formal bank account
         informal_headcount = max(total_employees - bank_employees, 0)
 
+        # MoMo transaction metrics for the past 30 days
         momo_count = cell.get("momo_transaction_count_30d", 0)
         momo_volume = cell.get("momo_volume_30d_zar", 0.0)
+
+        # Average MoMo transaction value; guard against division by zero
         avg_val = momo_volume / momo_count if momo_count > 0 else 0.0
 
+        # MoMo wallet penetration across the full workforce
         momo_enabled = cell.get("momo_enabled_employee_count", 0)
         momo_pct = momo_enabled / total_employees if total_employees > 0 else 0.0
 
+        # List of country codes where this client has active MoMo corridors
         corridors = cell.get("active_momo_corridors", [])
 
         return InformalClusterProfile(
@@ -220,29 +281,46 @@ class InformalEconomyHealthIndexer:
         cell: Optional[Dict],
         cluster: InformalClusterProfile,
     ) -> IEHIComponent:
+        """
+        Score MoMo transaction velocity per informal worker.
+
+        Velocity is measured as monthly transaction count divided by the
+        estimated informal headcount.  Higher velocity = more economically
+        active informal cluster.
+
+        :param cell:    Cell profile dict.
+        :param cluster: Pre-built InformalClusterProfile.
+        :return:        IEHIComponent for momo_velocity.
+        """
         name = "momo_velocity"
         weight = _COMPONENT_WEIGHTS[name]
+
         if not cell:
             return IEHIComponent(
                 name=name, score=0.0, weight=weight,
                 description="No MoMo data", data_present=False
             )
 
+        # Total MoMo transactions in the last 30 days
         count = cell.get("momo_transaction_count_30d", 0)
+
+        # Avoid division by zero with a floor of 1
         headcount = max(cluster.estimated_informal_headcount, 1)
+
+        # Per-capita transaction rate: normalised to the informal workforce
         txn_per_head = count / headcount
 
-        # Score: 2+ txns/person/month = healthy, 5+ = very active
+        # Tiered scoring: 5+ txns/person/month = very active informal economy
         if txn_per_head >= 5:
-            score = 90
+            score = 90  # Highly active informal cluster
         elif txn_per_head >= 3:
-            score = 75
+            score = 75  # Active
         elif txn_per_head >= 1.5:
-            score = 55
+            score = 55  # Moderate activity
         elif txn_per_head >= 0.5:
-            score = 35
+            score = 35  # Low activity — some engagement
         else:
-            score = 15
+            score = 15  # Near-dormant cluster
 
         return IEHIComponent(
             name=name,
@@ -261,24 +339,45 @@ class InformalEconomyHealthIndexer:
         pbb: Optional[Dict],
         cluster: InformalClusterProfile,
     ) -> IEHIComponent:
+        """
+        Score the reach of MoMo payroll within the informal workforce.
+
+        High MoMo penetration among informal workers (even those not
+        formally banked) signals a healthy, connected informal economy
+        with bankarisation potential.
+
+        :param cell:    Cell profile dict.
+        :param pbb:     PBB profile dict.
+        :param cluster: Pre-built InformalClusterProfile.
+        :return:        IEHIComponent for informal_payroll.
+        """
         name = "informal_payroll"
         weight = _COMPONENT_WEIGHTS[name]
+
         if not cell:
             return IEHIComponent(
                 name=name, score=0.0, weight=weight,
                 description="No data", data_present=False
             )
 
+        # Total and formal headcounts
         total = cell.get("estimated_employee_count", 1)
         bank = (pbb or {}).get("payroll_account_count", 0)
+
+        # Informal fraction of the workforce (those not in PBB payroll)
         informal_pct = (total - bank) / total if total > 0 else 0.0
 
-        # High informal payroll = opportunity; score by reach
+        # MoMo penetration rate from the cluster profile
         momo_pct = cluster.momo_enabled_pct
-        # If informal workers are using MoMo (even if not bank accounts)
-        # that is healthy for the informal economy
+
+        # MoMo reach sub-score: 100% penetration = 80 pts
+        # (even informal workers engaging digitally is a positive signal)
         reach_score = momo_pct * 80
+
+        # Size bonus: a larger informal cluster has more opportunity mass
+        # 500 informal workers = full 20 pts; scales linearly below that
         size_score = min(cluster.estimated_informal_headcount / 500 * 20, 20)
+
         score = min(reach_score + size_score, 100)
 
         return IEHIComponent(
@@ -295,26 +394,39 @@ class InformalEconomyHealthIndexer:
     def _score_geographic_spread(
         self, cell: Optional[Dict]
     ) -> IEHIComponent:
+        """
+        Score geographic spread of informal MoMo activity by counting
+        active cross-border corridors.
+
+        More corridors = more distributed informal trade network.
+
+        :param cell: Cell profile dict.
+        :return:     IEHIComponent for geographic_spread.
+        """
         name = "geographic_spread"
         weight = _COMPONENT_WEIGHTS[name]
+
         if not cell:
             return IEHIComponent(
                 name=name, score=0.0, weight=weight,
                 description="No data", data_present=False
             )
 
+        # List of country codes (e.g. ["ZW", "MZ", "ZM"]) with active MoMo flows
         corridors = cell.get("active_momo_corridors", [])
         count = len(corridors)
+
+        # Tiered scoring: more corridors = more geographically diverse informal economy
         if count >= 5:
-            score = 90
+            score = 90   # Well-distributed multi-country informal network
         elif count >= 3:
-            score = 70
+            score = 70   # Regional spread
         elif count >= 2:
-            score = 50
+            score = 50   # Two-country presence
         elif count == 1:
-            score = 30
+            score = 30   # Domestic only with one cross-border corridor
         else:
-            score = 10
+            score = 10   # No cross-border informal activity detected
 
         return IEHIComponent(
             name=name,
@@ -322,7 +434,7 @@ class InformalEconomyHealthIndexer:
             weight=weight,
             description=(
                 f"MoMo active in {count} corridors: "
-                f"{', '.join(corridors[:4])}"
+                f"{', '.join(corridors[:4])}"  # Show at most 4 corridors in description
             ),
             data_present=True,
         )
@@ -330,28 +442,42 @@ class InformalEconomyHealthIndexer:
     def _score_seasonal_resilience(
         self, cell: Optional[Dict]
     ) -> IEHIComponent:
+        """
+        Score the informal cluster's resilience to lean-season volume drops.
+
+        Agricultural cycles, school-fee periods, and harvest seasons cause
+        predictable MoMo volume dips across African markets.  Clusters that
+        maintain high volumes despite seasonal pressure are more robust.
+
+        :param cell: Cell profile dict.
+        :return:     IEHIComponent for seasonal_resilience.
+        """
         name = "seasonal_resilience"
         weight = _COMPONENT_WEIGHTS[name]
+
         if not cell:
             return IEHIComponent(
                 name=name, score=0.0, weight=weight,
                 description="No data", data_present=False
             )
 
+        # Fractional drop in MoMo volume during the leanest season month
+        # Default of 0.30 (30% drop) represents a typical African lean-season impact
         lean_month_drop = cell.get(
             "momo_lean_season_volume_drop_pct", 0.30
         )
-        # Lower drop = more resilient
+
+        # Inverted scoring: lower drop = more resilient = higher score
         if lean_month_drop <= 0.10:
-            score = 90
+            score = 90   # Near-flat through lean season — very resilient
         elif lean_month_drop <= 0.20:
-            score = 70
+            score = 70   # Moderate seasonal impact
         elif lean_month_drop <= 0.35:
-            score = 50
+            score = 50   # Noticeable but recoverable dip
         elif lean_month_drop <= 0.50:
-            score = 30
+            score = 30   # Significant vulnerability to seasonal pressure
         else:
-            score = 15
+            score = 15   # Severe lean-season collapse — fragile cluster
 
         return IEHIComponent(
             name=name,
@@ -368,25 +494,43 @@ class InformalEconomyHealthIndexer:
         cell: Optional[Dict],
         pbb: Optional[Dict],
     ) -> IEHIComponent:
+        """
+        Score the formalisation signal: new bank account openings in the
+        past 90 days from the informal cluster linked to this employer.
+
+        Higher formalisation rate predicts future NIM growth as informal
+        workers migrate from MoMo wallets to full bank accounts.
+
+        :param cell: Cell profile dict.
+        :param pbb:  PBB profile dict.
+        :return:     IEHIComponent for formalisation_signal.
+        """
         name = "formalisation_signal"
         weight = _COMPONENT_WEIGHTS[name]
+
         if not pbb and not cell:
             return IEHIComponent(
                 name=name, score=0.0, weight=weight,
                 description="No data", data_present=False
             )
 
-        # New bank account openings in past 90 days from employer cluster
+        # New bank accounts opened in 90 days by employees from the informal cluster
         new_accounts = (pbb or {}).get(
             "new_accounts_from_employer_cluster_90d", 0
         )
+
+        # Estimated informal headcount (denominator for rate calculation)
         total_informal = max(
             (cell or {}).get("estimated_employee_count", 100)
             - (pbb or {}).get("payroll_account_count", 0),
-            1
+            1  # Floor at 1 to avoid division by zero
         )
 
+        # Formalisation rate: new accounts as a fraction of informal headcount
         formalisation_rate = new_accounts / total_informal
+
+        # Score: 20% formalisation in 90 days = 100 pts
+        # (factor of 500 because 0.20 × 500 = 100)
         score = min(formalisation_rate * 500, 100)
 
         return IEHIComponent(
@@ -410,10 +554,20 @@ class InformalEconomyHealthIndexer:
         trajectory: str,
         cluster: InformalClusterProfile,
     ) -> str:
+        """
+        Generate a plain-English opportunity summary for the relationship
+        manager based on IEHI score, trajectory, and cluster profile.
+
+        :param iehi:       Composite IEHI score.
+        :param trajectory: GROWING / STABLE / DECLINING.
+        :param cluster:    InformalClusterProfile for volume/headcount context.
+        :return:           Multi-sentence opportunity narrative string.
+        """
         headcount = cluster.estimated_informal_headcount
         volume = cluster.estimated_monthly_momo_volume_zar
         corridors = len(cluster.active_momo_corridors)
 
+        # Best case: healthy and growing — recommend active bankarisation campaign
         if iehi >= 70 and trajectory == "GROWING":
             return (
                 f"Healthy and growing informal cluster: {headcount:,} workers, "
@@ -421,17 +575,20 @@ class InformalEconomyHealthIndexer:
                 f"High bankarisation opportunity — recommend MoMo-to-Account "
                 f"migration campaign and micro-lending pipeline."
             )
+        # Stable cluster — MoMo penetration improvement is the lever
         elif iehi >= 50:
             return (
                 f"Stable informal cluster: {headcount:,} workers, "
                 f"R{volume:,.0f}/month. "
                 f"MoMo penetration improvement would unlock NIM opportunity."
             )
+        # Declining cluster — flag for employer health monitoring
         elif trajectory == "DECLINING":
             return (
                 f"Declining informal cluster: {headcount:,} workers. "
                 f"Monitor for employer payroll delays or workforce contraction."
             )
+        # Early-stage cluster — adoption barriers need investigation
         else:
             return (
                 f"Early-stage informal cluster: {headcount:,} workers. "

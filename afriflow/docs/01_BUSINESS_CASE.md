@@ -1,4 +1,10 @@
-﻿# 01 Business Case
+﻿<!--
+@file 01_BUSINESS_CASE.md
+@description Business case for AfriFlow: problem statement, value thesis, and outcomes
+@author Thabo Kunene
+@created 2026-03-17
+-->
+# 01 Business Case
 
 > **Disclaimer**: Please read
 > [DISCLAIMER.md](../DISCLAIMER.md). This is not a
