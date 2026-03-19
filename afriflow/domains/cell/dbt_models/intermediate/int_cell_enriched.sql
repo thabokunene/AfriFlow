@@ -1,3 +1,9 @@
+/*
+ * @file int_cell_enriched.sql
+ * @description dbt intermediate model for enriched cell data, applying SIM deflation factors and aggregating metrics by corporate client.
+ * @author Thabo Kunene
+ * @created 2026-03-19
+ */
 {{
     config(
         materialized='table',
@@ -21,21 +27,22 @@
         - Country metadata
 */
 
+-- Pulling cleaned usage data from the staging model.
 WITH staged_usage AS (
     SELECT * FROM {{ ref('stg_cell_usage') }}
 ),
 
--- SIM deflation reference
+-- Reference table for SIM deflation factors per country.
 sim_deflation AS (
     SELECT * FROM {{ source('cell', 'sim_deflation_ref') }}
 ),
 
--- Corporate client master
+-- Master registry of corporate clients.
 client_master AS (
     SELECT * FROM {{ source('cell', 'client_master') }}
 ),
 
--- Monthly aggregation per corporate per country
+-- Aggregate SIM metrics at the corporate level per country and month.
 monthly_corporate AS (
     SELECT
         corporate_client_id,
@@ -43,32 +50,32 @@ monthly_corporate AS (
         DATE_TRUNC('month', usage_date) AS usage_month,
         integration_tier,
 
-        -- SIM counts
+        -- SIM lifecycle metrics.
         COUNT(DISTINCT sim_hash) AS total_active_sims,
         COUNT(DISTINCT CASE WHEN sim_status = 'ACTIVE' THEN sim_hash END) AS active_sims,
         COUNT(DISTINCT CASE WHEN activation_date >= DATE_TRUNC('month', usage_date) THEN sim_hash END) AS new_activations,
         COUNT(DISTINCT CASE WHEN sim_status IN ('DEACTIVATED', 'BARRED') THEN sim_hash END) AS deactivations,
 
-        -- Device mix
+        -- Breakdown by device capability (proxy for income and digital maturity).
         COUNT(DISTINCT CASE WHEN is_smartphone THEN sim_hash END) AS smartphone_count,
         COUNT(DISTINCT CASE WHEN NOT is_smartphone THEN sim_hash END) AS feature_phone_count,
 
-        -- Aggregated usage
+        -- Aggregated usage volumes across various channels.
         SUM(voice_minutes_in + voice_minutes_out) AS total_voice_minutes,
         SUM(data_usage_mb) / 1024 AS total_data_usage_gb,
         SUM(sms_sent + sms_received) AS total_sms_count,
         SUM(ussd_sessions) AS total_ussd_sessions,
         SUM(ussd_banking_sessions) AS total_ussd_banking,
 
-        -- Revenue
+        -- Aggregated revenue attribution.
         SUM(revenue_total) AS total_revenue,
         MAX(revenue_currency) AS revenue_currency,
 
-        -- Geographic spread
+        -- Spatial distribution metrics.
         COUNT(DISTINCT usage_city) AS distinct_cities,
         MODE(usage_city) AS primary_city,
 
-        -- Source record count
+        -- Metadata for data lineage tracking.
         COUNT(*) AS source_record_count
 
     FROM staged_usage
@@ -81,16 +88,16 @@ monthly_corporate AS (
         integration_tier
 ),
 
--- Apply SIM deflation model
+-- Enrich corporate aggregates with country-specific SIM deflation logic.
 with_deflation AS (
     SELECT
         mc.*,
         sd.deflation_factor,
         sd.avg_sims_per_person,
         sd.data_source AS deflation_source,
-        -- Estimated employees = active SIMs / deflation factor
+        -- Calculate estimated actual employee headcount based on multi-SIM behavior.
         ROUND(mc.active_sims::NUMERIC / NULLIF(sd.deflation_factor, 0))::INTEGER AS estimated_employees,
-        -- SIM growth calculations
+        -- Window function to track month-on-month growth.
         LAG(mc.active_sims) OVER (
             PARTITION BY mc.corporate_client_id, mc.usage_country
             ORDER BY mc.usage_month

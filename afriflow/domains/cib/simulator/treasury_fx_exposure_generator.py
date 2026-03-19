@@ -1,4 +1,11 @@
 """
+@file treasury_fx_exposure_generator.py
+@description Generator for synthetic CIB treasury FX exposure records, simulating currency risk and hedging activities for corporate clients.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Treasury FX Exposure Generator
 
 We generate realistic synthetic treasury FX exposure records
@@ -9,16 +16,25 @@ project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
+# Enables postponed evaluation of type annotations for forward references
 from __future__ import annotations
+# Random library for stochastic event generation
 import random
+# Standard logging for operational observability and audit trails
 import logging
+# Dataclass for structured representation of FX exposure records
 from dataclasses import dataclass
+# Datetime utilities for timestamping generated exposure records
 from datetime import datetime, timezone
+# Typing hints for defining strong functional and collection contracts
 from typing import Iterator, List, Optional
 
+# AfriFlow logging utility for consistent log formatting and traceability
 from afriflow.logging_config import get_logger
+# Base simulator class providing standard initialization and streaming methods
 from afriflow.domains.shared.interfaces import SimulatorBase
 
+# Initialize logger for the treasury FX exposure generator namespace
 logger = get_logger("domains.cib.simulator.treasury_fx_exposure_generator")
 
 
@@ -26,9 +42,14 @@ logger = get_logger("domains.cib.simulator.treasury_fx_exposure_generator")
 class FXExposure:
     """
     A single FX exposure record.
+    Represents the net currency exposure of a corporate client and their hedging status.
 
-    We publish these to the CIB domain Kafka topic
-    (cib.treasury.fx_exposures) for risk monitoring.
+    Attributes:
+        client_id: Unique identifier for the corporate client.
+        currency_pair: The currency pair representing the exposure (e.g., 'USD/ZAR').
+        exposure_usd: The net exposure amount converted to USD.
+        timestamp: The precise timestamp of the record generation.
+        hedged_pct: The percentage of the exposure that is currently hedged (0.0 to 1.0).
     """
 
     client_id: str
@@ -40,26 +61,32 @@ class FXExposure:
 
 class TreasuryFXExposureGenerator(SimulatorBase):
     """
-    We generate realistic synthetic treasury FX exposures
-    for testing and demo purposes.
+    Generator for realistic synthetic treasury FX exposures.
+    Useful for testing risk monitoring pipelines and hedging recommendation engines.
 
     Usage:
-        gen = TreasuryFXExposureGenerator(seed=42)
+        gen = TreasuryFXExposureGenerator()
         exposure = gen.generate_one(currency_pair="USD/ZAR")
     """
 
     def initialize(self, config=None) -> None:
-        """Initialize the generator with currency pairs."""
+        """
+        Initializes the generator with a predefined list of active currency pairs.
+        
+        :param config: Optional configuration object.
+        """
+        # Common currency pairs for African corporate treasury operations.
         self._pairs = ["USD/ZAR", "USD/NGN", "EUR/ZAR", "USD/KES", "GBP/ZAR", "EUR/NGN"]
         logger.info("TreasuryFXExposureGenerator initialized")
 
     def validate_input(self, **kwargs) -> None:
         """
-        Validate input parameters.
+        Validates input parameters before record generation.
 
-        Raises:
-            ValueError: If currency_pair is invalid or exposure is malformed
+        :param kwargs: Keyword arguments to validate.
+        :raises ValueError: If the currency pair is unknown or metrics are invalid.
         """
+        # Ensure the currency pair is in our registry and correctly formatted.
         pair = kwargs.get("currency_pair")
         if pair is not None:
             if not isinstance(pair, str) or "/" not in pair:
@@ -67,31 +94,29 @@ class TreasuryFXExposureGenerator(SimulatorBase):
             if pair not in self._pairs:
                 raise ValueError(f"Unknown currency_pair: {pair}")
 
+        # Guard against invalid exposure types.
         exposure = kwargs.get("exposure_usd")
         if exposure is not None and not isinstance(exposure, (int, float)):
             raise ValueError("exposure_usd must be a number")
 
+        # Ensure the hedge percentage is within valid probabilistic bounds.
         hedged = kwargs.get("hedged_pct")
         if hedged is not None and not (0.0 <= hedged <= 1.0):
             raise ValueError("hedged_pct must be between 0.0 and 1.0")
 
     def generate_one(self, **kwargs) -> FXExposure:
         """
-        Generate a single FX exposure record.
+        Generates a single synthetic treasury FX exposure record.
 
-        Args:
-            **kwargs: Optional overrides for currency_pair, exposure_usd, hedged_pct
-
-        Returns:
-            FXExposure instance
-
-        Raises:
-            ValueError: If input validation fails
-            RuntimeError: If generation fails
+        :param kwargs: Optional overrides for currency_pair, exposure_usd, and hedged_pct.
+        :return: An FXExposure instance.
+        :raises ValueError: If input validation fails.
+        :raises RuntimeError: If generation fails due to unexpected errors.
         """
         try:
             self.validate_input(**kwargs)
 
+            # Use provided values or generate random ones within realistic ranges.
             pair = kwargs.get("currency_pair") or random.choice(self._pairs)
             exposure = kwargs.get("exposure_usd") or round(
                 random.uniform(-5_000_000, 5_000_000), 2

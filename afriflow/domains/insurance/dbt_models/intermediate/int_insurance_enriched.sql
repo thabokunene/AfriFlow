@@ -1,3 +1,11 @@
+-- =============================================================================
+-- @file int_insurance_enriched.sql
+-- @description Intermediate enriched model for insurance policies, integrating
+--     client master data and country risk ratings for comprehensive analysis.
+-- @author Thabo Kunene
+-- @created 2026-03-19
+-- =============================================================================
+
 {{
     config(
         materialized='table',
@@ -6,33 +14,29 @@
 }}
 
 /*
-    Intermediate enriched Insurance model.
-
-    We enrich staged policies with:
-        - Client segmentation
-        - Coverage adequacy analysis
-        - Cross-sell opportunity flags
-        - CIB/Forex linkage for cross-domain signals
-
-    This model joins with reference data for client master
-    and country risk ratings.
+    Design intent:
+    - Enrich staged policy data with reference master data (clients, risk ratings).
+    - Perform adequacy analysis to identify coverage gaps in the portfolio.
+    - Provide flags for operational intervention (e.g., expiring policies).
+    - Create a consistent layer for cross-domain reporting (CIB, Forex).
 */
 
 WITH staged_policies AS (
+    -- Staged and cleaned policy records from the staging layer
     SELECT * FROM {{ ref('stg_insurance_policies') }}
 ),
 
--- Client master reference
+-- Client master reference for standardized client attributes
 client_master AS (
     SELECT * FROM {{ source('insurance', 'client_master') }}
 ),
 
--- Country risk ratings
+-- Country risk ratings for assessing geographical exposure
 country_risk AS (
     SELECT * FROM {{ source('insurance', 'country_risk_ratings') }}
 ),
 
--- Calculate policy metrics
+-- Calculate high-level policy metrics for client-level insights
 policy_metrics AS (
     SELECT
         client_id,
@@ -41,6 +45,7 @@ policy_metrics AS (
         SUM(sum_insured) AS total_sum_insured,
         COUNT(DISTINCT coverage_country) AS countries_covered,
         COUNT(DISTINCT policy_type) AS policy_types_held,
+        -- Operational alert: identify policies nearing the end of their term
         COUNT(CASE WHEN is_lapsing_90d THEN 1 END) AS policies_lapsing_90d,
         COUNT(CASE WHEN is_expired THEN 1 END) AS expired_policies,
         AVG(premium_annual) AS avg_premium,
@@ -51,7 +56,7 @@ policy_metrics AS (
     GROUP BY client_id
 ),
 
--- Coverage adequacy analysis
+-- Coverage adequacy analysis based on predefined business thresholds
 coverage_analysis AS (
     SELECT
         policy_id,
@@ -60,26 +65,27 @@ coverage_analysis AS (
         coverage_country,
         sum_insured,
         premium_annual,
-        -- Coverage gap flag (simplified - would compare to CIB asset values in production)
+        -- Coverage gap flag: identifies policies with sum insured below standard requirements
         CASE
             WHEN policy_type = 'ASSET' AND sum_insured < 1000000 THEN TRUE
             WHEN policy_type = 'CREDIT' AND sum_insured < 500000 THEN TRUE
             WHEN policy_type = 'LIABILITY' AND sum_insured < 2000000 THEN TRUE
             ELSE FALSE
         END AS coverage_gap,
+        -- Quantify the gap for financial modeling and upsell targeting
         CASE
             WHEN policy_type = 'ASSET' AND sum_insured < 1000000 THEN 1000000 - sum_insured
             WHEN policy_type = 'CREDIT' AND sum_insured < 500000 THEN 500000 - sum_insured
             WHEN policy_type = 'LIABILITY' AND sum_insured < 2000000 THEN 2000000 - sum_insured
             ELSE 0
         END AS coverage_gap_amount,
-        -- Days to expiry
+        -- Temporal analysis for retention management
         CASE
             WHEN expiry_date IS NOT NULL
             THEN expiry_date - CURRENT_DATE
             ELSE NULL
         END AS days_to_expiry,
-        -- Lapsing flag (within 90 days)
+        -- Lapsing flag (within 90 days) for proactive renewal campaigns
         CASE
             WHEN expiry_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '90 days'
             THEN TRUE
@@ -88,7 +94,7 @@ coverage_analysis AS (
     FROM staged_policies
 ),
 
--- Enrich with client and country data
+-- Final enrichment join combining policy, client, and risk data
 enriched AS (
     SELECT
         ca.policy_id,
@@ -124,6 +130,7 @@ enriched AS (
       AND sp.is_valid_premium = TRUE
 )
 
+-- Final selection provides a comprehensive snapshot for the marts layer
 SELECT
     policy_id,
     policy_type,

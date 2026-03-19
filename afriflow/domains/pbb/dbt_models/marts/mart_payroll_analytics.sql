@@ -1,3 +1,11 @@
+-- =============================================================================
+-- @file mart_payroll_analytics.sql
+-- @description Final analytical mart for PBB payroll data, integrating batch
+--     processing status and financial health metrics for corporate client insights.
+-- @author Thabo Kunene
+-- @created 2026-03-19
+-- =============================================================================
+
 {{
     config(
         materialized='table',
@@ -6,27 +14,19 @@
 }}
 
 /*
-    Mart: Payroll Analytics
-
-    Aggregated payroll-level analytics including:
-        - Employee account metrics
-        - Payroll value and frequency
-        - Channel adoption
-        - Account health indicators
-        - Payroll regularity tracking
-
-    This mart powers:
-        - Workforce capture analysis
-        - Payroll retention monitoring
-        - Cross-sell opportunity identification
-        - Competitive leakage detection
+    Design intent:
+    - Provide a unified view of corporate payroll performance and employee health.
+    - Track payroll regularity and identify potential processing failures.
+    - Estimate corporate client revenue potential based on payroll throughput.
+    - Power dashboards for competitive leakage and workforce capture analysis.
 */
 
 WITH enriched_payroll AS (
+    -- Enriched payroll data aggregated by corporate employer
     SELECT * FROM {{ ref('int_pbb_enriched') }}
 ),
 
--- Payroll batch tracking (would join with payroll_raw in production)
+-- Payroll batch tracking to monitor operational delivery and reliability
 payroll_batches AS (
     SELECT
         employer_client_id AS corporate_client_id,
@@ -36,6 +36,7 @@ payroll_batches AS (
         SUM(employee_count) AS total_employees,
         SUM(total_payroll_value_zar) AS total_payroll_value,
         AVG(average_salary) AS avg_salary,
+        -- Status tracking to identify successful vs failed payroll cycles
         COUNT(CASE WHEN processing_status = 'COMPLETED' THEN 1 END) AS completed_batches,
         COUNT(CASE WHEN processing_status = 'FAILED' THEN 1 END) AS failed_batches
     FROM {{ source('pbb', 'payroll_raw') }}
@@ -46,7 +47,7 @@ payroll_batches AS (
         DATE_TRUNC('month', payroll_date)
 ),
 
--- Combined payroll metrics
+-- Combined metrics for a comprehensive view of the payroll ecosystem
 combined AS (
     SELECT
         ep.corporate_client_id,
@@ -75,7 +76,7 @@ combined AS (
         COALESCE(pb.failed_batches, 0) AS failed_batches,
         COALESCE(pb.avg_salary, ep.average_salary) AS avg_salary,
 
-        -- Payroll regularity
+        -- Payroll regularity: high percentage indicates a stable corporate client
         CASE
             WHEN COALESCE(pb.failed_batches, 0) = 0 THEN 100.0
             ELSE ROUND(
@@ -84,10 +85,10 @@ combined AS (
         END AS on_time_pct,
         CASE WHEN COALESCE(pb.failed_batches, 0) > 0 THEN TRUE ELSE FALSE END AS missed_payment_flag,
 
-        -- Estimated revenue (2% of payroll value as proxy)
+        -- Estimated revenue potential: used for client tiering and profitability analysis
         ep.total_payroll_value_zar * 0.02 AS estimated_account_revenue_zar,
 
-        -- Previous month for trend
+        -- Trend analysis via window functions
         LAG(ep.employee_count) OVER (
             PARTITION BY ep.corporate_client_id, ep.payroll_country
             ORDER BY ep.payroll_month
@@ -104,17 +105,17 @@ combined AS (
         AND ep.payroll_month = pb.payroll_month
 ),
 
--- Calculate trends
+-- Calculate growth trends for early warning signals
 with_trends AS (
     SELECT
         *,
-        -- Employee growth
+        -- Headcount change: indicator of business expansion or distress
         CASE
             WHEN prev_month_employees > 0
             THEN employee_count - prev_month_employees
             ELSE 0
         END AS employee_change,
-        -- Payroll growth
+        -- Payroll growth: indicator of wage adjustments or significant hiring
         CASE
             WHEN prev_month_payroll > 0
             THEN ROUND(
@@ -125,6 +126,7 @@ with_trends AS (
     FROM combined
 )
 
+-- Final output selection for presentation layer consumption
 SELECT
     'GOLD-' || corporate_client_id AS golden_id,
     corporate_client_id,

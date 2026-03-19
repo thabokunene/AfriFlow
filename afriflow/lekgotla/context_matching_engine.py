@@ -1,16 +1,10 @@
 """
-Lekgotla Context Matching Engine
-
-Matches incoming signals to relevant threads and Knowledge Cards
-based on signal type, client, country, corridor, and tags.
-
-This enables RMs to see relevant discussions when they receive
-alerts, providing institutional context for their actions.
-
-DISCLAIMER: This project is not a sanctioned initiative
-of Standard Bank Group, MTN, or any affiliated entity.
-It is a demonstration of concept, domain knowledge,
-and data engineering skill by Thabo Kunene.
+@file context_matching_engine.py
+@description Context matching engine for the Lekgotla module, linking incoming
+    business signals to relevant discussion threads and Knowledge Cards based on
+    signal type, client, country, and corridor.
+@author Thabo Kunene
+@created 2026-03-19
 """
 
 from __future__ import annotations

@@ -1,4 +1,11 @@
 """
+@file cash_management_generator.py
+@description Generator for synthetic CIB cash management instructions, simulating corporate treasury activities.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Cash Management Instruction Generator
 
 We generate realistic synthetic cash management
@@ -51,16 +58,25 @@ project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
+# Standard math library for calculating transaction amounts and distributions
 import math
+# Random library for stochastic event generation based on market profiles
 import random
+# UUID for generating unique transaction and record identifiers
 import uuid
+# Dataclass for structured representation of cash management instructions
 from dataclasses import dataclass
+# Datetime utilities for timestamping generated events
 from datetime import datetime, timedelta, timezone
+# Typing hints for defining strong functional and collection contracts
 from typing import Dict, Iterator, List, Optional
 
+# Custom exception for configuration-related failures in the generator
 from afriflow.exceptions import ConfigurationError
+# AfriFlow logging utility for consistent log formatting and traceability
 from afriflow.logging_config import get_logger
 
+# Initialize module-level logger for the cash management simulator
 logger = get_logger(__name__)
 
 
@@ -70,6 +86,7 @@ logger = get_logger(__name__)
 
 # Typical domestic sweep threshold (USD) — amount
 # above which a subsidiary auto-sweeps to master.
+# These thresholds reflect common treasury practices in specific African markets.
 SWEEP_THRESHOLDS_USD: Dict[str, float] = {
     "ZA": 10_000,
     "NG": 5_000,
@@ -80,14 +97,16 @@ SWEEP_THRESHOLDS_USD: Dict[str, float] = {
     "ZM": 3_000,
     "MZ": 2_000,
 }
+# Default sweep threshold for countries not explicitly profiled.
 DEFAULT_SWEEP_THRESHOLD_USD = 3_000.0
 
 # Cash management hub countries — corporates typically
 # concentrate to these markets from subsidiaries.
+# These hubs are often regional financial centers.
 TREASURY_HUBS = ["ZA", "KE", "NG", "AE", "GB"]
 
 # Average payroll disbursement per employee per month (USD).
-# Used to scale payroll disbursement amounts.
+# Used to scale payroll disbursement amounts to realistic levels for each country.
 AVG_PAYROLL_USD_PER_EMPLOYEE: Dict[str, float] = {
     "ZA": 1_200,
     "NG": 600,

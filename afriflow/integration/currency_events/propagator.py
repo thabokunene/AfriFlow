@@ -1,30 +1,10 @@
 """
 @file propagator.py
-@description Currency event propagator for AfriFlow integration layer.
-             Classifies FX rate movements into event types and propagates
-             the systemic impact across all five domains (CIB, Forex,
-             Insurance, Cell, PBB) whenever a major African FX event
-             is detected. Treats currency events as cross-cutting shocks,
-             not isolated single-domain risks.
+@description Currency event propagator for the AfriFlow integration layer,
+    classifying FX rate movements into event types and propagating systemic
+    impacts across all five domains (CIB, Forex, Insurance, Cell, PBB).
 @author Thabo Kunene
-@created 2026-03-18
-
-CURRENCY EVENT PROPAGATOR
-
-When a major FX event occurs (devaluation, rapid depreciation, capital
-control change), we propagate the impact across all five domains
-immediately.
-
-This module is the architectural element that demonstrates understanding
-of African FX dynamics that no Western or East Asian banking platform
-includes. In developed markets, FX is a standalone risk. In Africa,
-a currency event is a systemic shock.
-
-DISCLAIMER: This project is not sanctioned by, affiliated with, or
-endorsed by Standard Bank Group, MTN Group, or any of their subsidiaries.
-It is a demonstration of concept, domain knowledge, and technical skill
-built by Thabo Kunene for portfolio and learning purposes only. All data
-is simulated.
+@created 2026-03-19
 """
 
 from dataclasses import dataclass, field  # dataclasses for clean value-object definitions

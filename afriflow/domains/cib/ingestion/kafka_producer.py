@@ -1,4 +1,11 @@
 """
+@file kafka_producer.py
+@description Kafka producer for CIB domain ingestion, providing schema validation for payment events.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 CIB Kafka Producer.
 
 We produce CIB payment events to Kafka topics.
@@ -9,43 +16,59 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
+# Type hinting for defining strong collection and functional contracts
 from typing import Dict, Any, Optional, List
+# Standard logging for operational observability and audit trails
 import logging
+# Standard library for JSON encoding/decoding of payment payloads
 import json
+# Regular expression support for schema validation of country and currency codes
 import re
 
+# Initialize module-level logger for CIB ingestion events
 logger = logging.getLogger(__name__)
 
 
-# Payment schema validation constants
+# Set of mandatory fields that must be present in every payment record.
+# This ensures structural integrity before the data enters the streaming pipeline.
 REQUIRED_PAYMENT_FIELDS = {
     "transaction_id", "timestamp", "amount", "currency",
     "sender_name", "sender_country", "beneficiary_name",
     "beneficiary_country", "status", "purpose_code", "corridor"
 }
+
+# Regex pattern for two-letter ISO country codes (e.g., 'ZA', 'NG').
 COUNTRY_CODE_PATTERN = re.compile(r"^[A-Z]{2}$")
+# Regex pattern for three-letter ISO currency codes (e.g., 'ZAR', 'USD').
 CURRENCY_CODE_PATTERN = re.compile(r"^[A-Z]{3}$")
+# Permitted lifecycle statuses for a payment transaction.
 STATUS_VALUES = {"COMPLETED", "PENDING", "FAILED"}
+# Standardized ISO 20022 purpose codes commonly used in CIB payments.
 PURPOSE_CODE_VALUES = {"CORT", "INTC", "DIVI", "SALA", "TREA"}
 
 
 class KafkaProducerError(Exception):
-    """Custom exception for Kafka producer errors."""
+    """
+    Base exception for all CIB Kafka producer errors.
+    """
     pass
 
 
 class ValidationError(KafkaProducerError):
-    """Exception raised when payment validation fails."""
+    """
+    Exception raised when a payment record fails schema or business rule validation.
+    """
     pass
 
 
 class CIBKafkaProducer:
     """
-    Produces CIB payment events to Kafka.
+    Handles the production of validated CIB payment events to a Kafka topic.
 
     Attributes:
-        topic: Kafka topic name
-        producer: Kafka producer instance
+        topic: The target Kafka topic for payment ingestion.
+        bootstrap_servers: Comma-separated list of Kafka broker addresses.
+        producer: The underlying Kafka client instance.
     """
 
     def __init__(
@@ -54,14 +77,11 @@ class CIBKafkaProducer:
         bootstrap_servers: str = "localhost:9092"
     ) -> None:
         """
-        Initialize the Kafka producer.
+        Initializes the CIB Kafka producer with connection and topic details.
 
-        Args:
-            topic: Kafka topic name
-            bootstrap_servers: Kafka broker addresses
-
-        Raises:
-            ValueError: If topic or bootstrap_servers is invalid
+        :param topic: Target Kafka topic. Defaults to 'cib.payments.v1'.
+        :param bootstrap_servers: Kafka broker connection string.
+        :raises ValueError: If topic or bootstrap_servers are empty or invalid types.
         """
         if not topic or not isinstance(topic, str):
             raise ValueError("topic must be a non-empty string")
@@ -79,23 +99,20 @@ class CIBKafkaProducer:
 
     def _validate_payment(self, payment: Dict[str, Any]) -> None:
         """
-        Validate payment data against schema requirements.
+        Validates a payment record against required fields, patterns, and permitted values.
 
-        Args:
-            payment: Payment dictionary to validate
-
-        Raises:
-            ValidationError: If payment validation fails
+        :param payment: The payment dictionary to validate.
+        :raises ValidationError: If any schema or business rule check fails.
         """
         if not isinstance(payment, dict):
             raise ValidationError("Payment must be a dictionary")
 
-        # Check required fields
+        # Structural check: Ensure all mandatory fields are present
         missing_fields = REQUIRED_PAYMENT_FIELDS - set(payment.keys())
         if missing_fields:
             raise ValidationError(f"Missing required fields: {missing_fields}")
 
-        # Validate country codes
+        # Data quality check: Validate country codes follow ISO standards
         if not COUNTRY_CODE_PATTERN.match(payment["sender_country"]):
             raise ValidationError(
                 f"Invalid sender_country: {payment['sender_country']}"

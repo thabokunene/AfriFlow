@@ -1,51 +1,87 @@
 """
 @file payroll_analytics.py
-@description Payroll analytics processor enforcing RBAC validation and safe synchronous processing
+@description Spark-based payroll analytics processor for the PBB domain,
+    enforcing RBAC-based security controls and validating batch record integrity.
 @author Thabo Kunene
-@created 2026-03-17
+@created 2026-03-19
 """
+
+# Standard logging for operational observability and audit trails
 import logging
-from afriflow.domains.shared.interfaces import BaseProcessor  # Shared processor base with configure/validate/process methods
-from afriflow.domains.shared.config import get_config  # Global config for environment-aware RBAC
+# BaseProcessor defines the standardized processing lifecycle used across all AfriFlow domains
+from afriflow.domains.shared.interfaces import BaseProcessor
+# get_config provides environment-aware settings for security and operational constraints
+from afriflow.domains.shared.config import get_config
 
 
 class Processor(BaseProcessor):
     """
     Validates payroll analytics inputs and marks records processed after checks.
+    
+    Design intent:
+    - Enforce environment-aware RBAC (Role-Based Access Control) for batch payroll data.
+    - Limit payload size to maintain Spark job stability.
+    - Provide structured error logging for batch processing troubleshooting.
     """
+
     def configure(self, config=None) -> None:
         """
-        Configure logger, allowed roles based on environment, and payload size limit.
+        Sets internal configuration such as allowed roles and record size limits.
+        Staging and production environments have more restrictive access controls.
+        
+        :param config: Optional configuration override.
         """
         self.logger = logging.getLogger(__name__)
+        # Fallback to global config if no specific config is provided
         env = (self.config.env if self.config else get_config().env)
+        # Define allowed roles based on the operational environment (system/service only in prod)
         self._allowed_roles = {"system", "service"} if env in {"staging", "prod"} else {"system", "service", "analyst"}
+        # Prevent oversized records from causing memory issues in batch Spark jobs
         self._max_record_size = 100_000
 
     def validate(self, record) -> None:
         """
-        Validate record type, role-based access, source attribution, and size constraints.
+        Validates the input record's type, security role, and mandatory fields.
+        
+        :param record: The record to be validated.
+        :raises TypeError: If the record is not a dictionary.
+        :raises PermissionError: If the role associated with the record is not authorized.
+        :raises ValueError: If the record is missing required fields or exceeds the size limit.
         """
         if not isinstance(record, dict):
             raise TypeError("record must be a dict")
+            
         role = record.get("access_role")
         src = record.get("source")
+        
+        # Security check: verify the caller has the necessary permissions for the environment
         if role not in self._allowed_roles:
             raise PermissionError("access_role not permitted")
+            
+        # Lineage check: source must be clearly identified for audit and reconciliation
         if not src or not isinstance(src, str):
             raise ValueError("source is required")
+            
+        # Payload safety check for Spark executor memory stability
         if len(str(record)) > self._max_record_size:
             raise ValueError("record too large")
 
     def process_sync(self, record):
         """
-        Synchronously process validated records and add a processed flag.
+        Synchronously processes and marks a payroll analytics record after validation.
+        
+        :param record: The input record to process.
+        :return: A copy of the record with a processing flag.
+        :raises Exception: Re-raises any errors encountered during validation or processing.
         """
         try:
             self.validate(record)
+            # Create a shallow copy for safe transformation
             out = dict(record)
+            # Mark the record as successfully processed by this module
             out["processed"] = True
             return out
         except Exception as e:
+            # Log failure with structured context for easier debugging
             self.logger.error("processor_error", extra={"error": str(e), "etype": e.__class__.__name__})
             raise

@@ -1,33 +1,10 @@
 """
-Audit Middleware
-
-Every API request is logged to the AfriFlow audit trail.
-This satisfies:
-  - POPIA Section 22: notification of security compromises
-  - FAIS: records of client data access for 5 years
-  - GDPR Article 30: records of processing activities
-  - Internal MIS: RM activity tracking for outcome analysis
-
-Audit record fields:
-  request_id    — UUID (correlates with API response)
-  timestamp     — ISO 8601
-  user_id       — from JWT sub claim
-  role          — RM / Compliance / ExCo / Service
-  country       — requester's home country
-  method        — HTTP method
-  path          — sanitised path (golden_id → [REDACTED] if PII)
-  client_accessed — golden_id accessed (for client records)
-  status_code   — HTTP response code
-  duration_ms   — request duration
-  pii_fields_accessed — which POPIA-classified fields were returned
-  cross_border  — True if requester accessed another country's data
-
-Records are written to:
-  1. The SHA-256 hash-chain audit log (audit_trail_logger)
-  2. A streaming topic for near-real-time compliance dashboards
-
-Disclaimer: Portfolio project by Thabo Kunene. Not a
-Standard Bank Group product. All data is simulated.
+@file audit_middleware.py
+@description Audit middleware for the AfriFlow API, recording every request to
+    satisfy POPIA, FAIS, and GDPR compliance requirements, tracking PII access
+    and cross-border data flows.
+@author Thabo Kunene
+@created 2026-03-19
 """
 
 from __future__ import annotations

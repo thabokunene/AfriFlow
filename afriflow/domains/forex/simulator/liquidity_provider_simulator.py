@@ -1,4 +1,11 @@
 """
+@file liquidity_provider_simulator.py
+@description Generator for synthetic FX liquidity provider quotes, simulating various LP types and their market-making behavior.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Liquidity Provider Simulator
 
 We generate realistic synthetic liquidity provider quotes
@@ -22,27 +29,45 @@ Group project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
+# Enables postponed evaluation of type annotations for forward references
 from __future__ import annotations
+# Random library for stochastic price and spread generation
 import random
+# Standard logging for operational telemetry and audit trails
 import logging
+# Dataclasses for structured representation of liquidity quotes
 from dataclasses import dataclass
+# Datetime utilities for timestamping generated quotes
 from datetime import datetime, timezone
+# Typing hints for defining strong functional and collection contracts
 from typing import Iterator, List, Optional, Dict
 
+# AfriFlow logging utility for consistent log formatting and traceability
 from afriflow.logging_config import get_logger
+# Base simulator class providing standard initialization and streaming methods
 from afriflow.domains.shared.interfaces import SimulatorBase
 
+# Initialize logger for the liquidity provider simulator namespace
 logger = get_logger("domains.forex.simulator.liquidity_provider_simulator")
 
 
 @dataclass
 class LiquidityQuote:
     """
-    A single liquidity provider quote.
+    A single liquidity provider quote record.
+    Represents an executable or firm price provided by an LP.
 
-    We publish these to the forex domain Kafka topic
-    (forex.liquidity_quotes) for best execution analysis
-    and LP performance monitoring.
+    Attributes:
+        quote_id: Unique identifier for the quote.
+        provider: Identifier of the liquidity provider (e.g., 'LP-A').
+        currency_pair: The currency pair being quoted (e.g., 'USD/ZAR').
+        bid: The price at which the LP is willing to buy.
+        ask: The price at which the LP is willing to sell.
+        bid_size_musd: Liquidity available on the bid side in millions of USD.
+        ask_size_musd: Liquidity available on the ask side in millions of USD.
+        timestamp: The precise ISO timestamp when the quote was issued.
+        depth_musd: Total depth of the order book for this LP in millions of USD.
+        is_firm: Boolean flag indicating if the price is guaranteed for execution.
     """
 
     quote_id: str
@@ -59,15 +84,17 @@ class LiquidityQuote:
 
 class LiquidityProviderSimulator(SimulatorBase):
     """
-    We generate realistic synthetic LP quotes for
-    testing and demo purposes.
+    Generator for realistic synthetic LP quotes.
+    Useful for testing best execution algorithms and market depth analytics.
 
     Usage:
-        gen = LiquidityProviderSimulator(seed=42)
+        gen = LiquidityProviderSimulator()
         quote = gen.generate_one(currency_pair="USD/ZAR")
     """
 
-    # Liquidity provider profiles
+    # Profiles defining the behavior of different types of liquidity providers.
+    # spread_factor: multipliers for the base spread (lower is tighter).
+    # depth_factor: multipliers for the base liquidity depth (higher is deeper).
     PROVIDERS = {
         "LP-A": {"type": "tier_1_global", "spread_factor": 0.8, "depth_factor": 2.0},
         "LP-B": {"type": "tier_1_global", "spread_factor": 0.9, "depth_factor": 1.8},
@@ -76,7 +103,7 @@ class LiquidityProviderSimulator(SimulatorBase):
         "LP-E": {"type": "electronic_mm", "spread_factor": 0.7, "depth_factor": 1.5},
     }
 
-    # Base mid prices for major pairs
+    # Base mid prices for major and African currency pairs used as a simulation anchor.
     BASE_PRICES = {
         "USD/ZAR": 18.50, "USD/NGN": 1580.0, "USD/KES": 130.0,
         "USD/GHS": 15.5, "EUR/ZAR": 20.0, "GBP/ZAR": 23.5,
@@ -84,6 +111,12 @@ class LiquidityProviderSimulator(SimulatorBase):
     }
 
     def __init__(self, seed: Optional[int] = None, config=None):
+        """
+        Initializes the liquidity provider simulator.
+
+        :param seed: Optional random seed for deterministic generation.
+        :param config: Optional AppConfig override.
+        """
         if seed is not None:
             random.seed(seed)
         self._quote_count = 0
@@ -91,13 +124,31 @@ class LiquidityProviderSimulator(SimulatorBase):
         super().__init__(config)
 
     def initialize(self, config=None) -> None:
-        """Initialize the simulator with default pairs."""
+        """
+        Sets up the internal state including active pairs and providers.
+        
+        :param config: Optional configuration object.
+        """
         self._pairs = list(self.BASE_PRICES.keys())
         self._providers = list(self.PROVIDERS.keys())
         logger.info("LiquidityProviderSimulator configuration loaded")
 
     def validate_input(self, **kwargs) -> None:
         """
+        Validates input parameters before quote generation.
+        
+        :param kwargs: Keyword arguments to validate.
+        :raises ValueError: If the currency pair or provider is unknown.
+        """
+        # Ensure the currency pair is in our registry.
+        pair = kwargs.get("currency_pair")
+        if pair is not None and pair not in self._pairs:
+            raise ValueError(f"Unknown currency_pair: {pair}")
+
+        # Ensure the provider is in our registry.
+        provider = kwargs.get("provider")
+        if provider is not None and provider not in self._providers:
+            raise ValueError(f"Unknown provider: {provider}")
         Validate input parameters.
 
         Raises:

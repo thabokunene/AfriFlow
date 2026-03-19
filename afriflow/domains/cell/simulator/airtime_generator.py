@@ -1,4 +1,11 @@
 """
+@file airtime_generator.py
+@description Generator for synthetic airtime top-up events, simulating financial health and workforce growth signals.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Airtime Top-Up Pattern Generator
 
 We generate realistic synthetic airtime purchase events
@@ -35,16 +42,25 @@ or MTN Group project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
+# Standard math library for calculating distributions and rounding
 import math
+# Random library for stochastic event generation
 import random
+# UUID for generating unique transaction and record identifiers
 import uuid
+# Dataclass for structured representation of top-up events
 from dataclasses import dataclass
+# Datetime utilities for timestamping generated events
 from datetime import datetime, timedelta, timezone
+# Typing hints for improved code clarity and static analysis
 from typing import Dict, Iterator, List, Optional
 
+# Custom exception for configuration-related failures
 from afriflow.exceptions import ConfigurationError
+# AfriFlow logging utility for consistent log formatting
 from afriflow.logging_config import get_logger
 
+# Initialize module-level logger
 logger = get_logger(__name__)
 
 
@@ -52,8 +68,8 @@ logger = get_logger(__name__)
 # Market profiles
 # ---------------------------------------------------------------------------
 
-# Country-specific airtime amount buckets in USD.
-# Buckets reflect actual denomination availability.
+# Dictionary mapping ISO country codes to available airtime top-up amounts in USD.
+# These buckets reflect the actual denominations commonly available in each market.
 TOPUP_AMOUNTS_USD: Dict[str, List[float]] = {
     "ZA": [1.0, 2.5, 5.0, 10.0, 20.0, 50.0],
     "NG": [0.5, 1.0, 2.0, 5.0, 10.0],
@@ -69,12 +85,11 @@ TOPUP_AMOUNTS_USD: Dict[str, List[float]] = {
     "CM": [0.5, 1.0, 2.0, 5.0],
 }
 
-# Default buckets for countries without a specific profile
+# Fallback top-up amounts for countries without a specific profile.
 DEFAULT_TOPUP_AMOUNTS_USD = [0.5, 1.0, 2.0, 5.0, 10.0]
 
-# Top-up amount weight distributions — smaller amounts
-# are more frequent in markets with lower income.
-# Weights are indexed to match TOPUP_AMOUNTS_USD buckets.
+# Probability weights for each top-up amount bucket per country.
+# Higher weights for smaller amounts often correlate with lower-income market segments.
 TOPUP_AMOUNT_WEIGHTS: Dict[str, List[float]] = {
     "ZA": [0.10, 0.20, 0.30, 0.25, 0.10, 0.05],
     "NG": [0.25, 0.35, 0.25, 0.10, 0.05],
@@ -84,8 +99,8 @@ TOPUP_AMOUNT_WEIGHTS: Dict[str, List[float]] = {
     "UG": [0.35, 0.30, 0.20, 0.10, 0.05],
 }
 
-# Channel distribution for individual top-ups.
-# Sum must equal 1.0.
+# Probability distribution for the channel used to perform a top-up.
+# Reflects the digital maturity of the user base.
 CHANNEL_WEIGHTS: Dict[str, float] = {
     "ussd":         0.45,
     "mobile_app":   0.25,
@@ -93,8 +108,7 @@ CHANNEL_WEIGHTS: Dict[str, float] = {
     "bank_transfer": 0.05,
 }
 
-# Approximate USD to local currency rates.
-# Matches the rates in momo_generator.py for consistency.
+# Approximate exchange rates from USD to local currencies for realistic record generation.
 USD_RATES: Dict[str, float] = {
     "NGN": 1580.0, "KES": 130.0, "GHS": 15.5,
     "TZS": 2550.0, "UGX": 3750.0, "ZMW": 27.5,

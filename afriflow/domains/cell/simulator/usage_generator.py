@@ -1,4 +1,11 @@
 """
+@file usage_generator.py
+@description Generator for synthetic cell network usage patterns, simulating voice, data, and SMS behavior across African markets.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Cell Network Usage Pattern Generator
 
 We generate realistic synthetic voice and data usage
@@ -37,14 +44,22 @@ or MTN Group project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
+# Standard math library for calculating usage durations and data volumes
 import math
+# Random library for stochastic event generation based on usage mix profiles
 import random
+# UUID for generating unique session and record identifiers
 import uuid
+# Dataclass for structured representation of network usage events
 from dataclasses import dataclass
+# Datetime utilities for timestamping generated events
 from datetime import datetime, timedelta, timezone
+# Typing hints for defining strong functional and collection contracts
 from typing import Dict, Iterator, List, Optional
+# AfriFlow logging utility for consistent log formatting
 from afriflow.logging_config import get_logger
 
+# Initialize module-level logger
 logger = get_logger(__name__)
 
 
@@ -52,7 +67,8 @@ logger = get_logger(__name__)
 # Usage market profiles
 # ---------------------------------------------------------------------------
 
-# Country-level usage mix — proportion of each usage type.
+# Dictionary defining the proportion of each usage type (voice, data, sms) per country.
+# These profiles reflect varying levels of digital adoption across different African markets.
 USAGE_MIX: Dict[str, Dict[str, float]] = {
     "ZA": {
         "voice_outgoing": 0.20,
@@ -92,6 +108,7 @@ USAGE_MIX: Dict[str, Dict[str, float]] = {
     },
 }
 
+# Fallback usage mix for countries not explicitly defined in the profile registry.
 DEFAULT_USAGE_MIX: Dict[str, float] = {
     "voice_outgoing": 0.28,
     "voice_incoming": 0.28,

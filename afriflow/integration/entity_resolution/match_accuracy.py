@@ -1,15 +1,10 @@
 """
 @file match_accuracy.py
-@description Match Accuracy Evaluator for the AfriFlow entity resolution layer.
-             Evaluates entity resolution quality by comparing predicted match
-             groupings against a curated ground truth dataset using pairwise
-             precision and recall. False merges (two distinct entities grouped
-             together) and false splits (same entity appearing in two records)
-             are tracked separately. Accuracy measurement is critical for RM
-             trust: a 15% false merge rate produces catastrophically wrong
-             cross-sell recommendations.
+@description Match accuracy evaluator for the AfriFlow entity resolution layer,
+    measuring quality by comparing predicted match groupings against ground truth
+    using pairwise precision, recall, and F1 metrics.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 from dataclasses import dataclass  # structured metrics value object

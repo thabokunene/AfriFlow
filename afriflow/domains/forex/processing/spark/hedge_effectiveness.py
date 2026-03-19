@@ -1,4 +1,11 @@
 """
+@file hedge_effectiveness.py
+@description Spark-based processor for calculating FX hedge effectiveness metrics using dollar offset and other statistical methods.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Hedge Effectiveness (Forex, Spark-style).
 
 We calculate hedge effectiveness metrics for accounting
@@ -21,47 +28,69 @@ the underlying exposure:
 
 This processor implements security-hardened validation
 with RBAC and structured logging.
+
+DISCLAIMER: This project is not a sanctioned initiative
+of Standard Bank Group, MTN, or any affiliated entity.
+It is a demonstration of concept, domain knowledge,
+and data engineering skill by Thabo Kunene.
 """
 
+# Standard logging for operational observability and risk management auditing
 import logging
+# Type hinting for defining strong collection and functional contracts
 from typing import Any, Dict, Optional
 
+# BaseProcessor defines the core processing contract used across all AfriFlow domains
 from afriflow.domains.shared.interfaces import BaseProcessor
+# get_config provides environment-aware settings for security and operational constraints
 from afriflow.domains.shared.config import get_config
 
+# Initialize module-level logger for hedge effectiveness events
 logger = logging.getLogger(__name__)
 
 
-# Hedge effectiveness thresholds (IFRS 9 / ASC 815)
+# Hedge effectiveness thresholds based on international accounting standards (IFRS 9 / ASC 815).
+# These ranges determine whether a hedge qualifies for hedge accounting treatment.
 EFFECTIVENESS_THRESHOLDS = {
-    "highly_effective": (80.0, 125.0),  # Accounting hedge qualification
-    "effective": (70.0, 140.0),          # Good risk management
-    "partially_effective": (50.0, 200.0), # Some offset achieved
-    "ineffective": (0.0, float("inf")),   # Poor or no offset
+    "highly_effective": (80.0, 125.0),  # Accounting hedge qualification range
+    "effective": (70.0, 140.0),          # Acceptable for internal risk management
+    "partially_effective": (50.0, 200.0), # Achieves some offset but requires review
+    "ineffective": (0.0, float("inf")),   # Poor offset; likely an ineffective hedge
 }
 
 
 class Processor(BaseProcessor):
     """
-    Processor for hedge effectiveness calculation with:
-    - RBAC based on environment
-    - Input validation (dict, required fields, size guard)
-    - Effectiveness calculation (dollar offset method)
-    - Structured error logging
+    Hedge effectiveness implementation of the BaseProcessor.
+    Calculates the ratio of hedge P&L to exposure P&L to assess risk mitigation quality.
+    
+    Design intent:
+    - Enforce environment-aware RBAC (Role-Based Access Control).
+    - Limit payload size to maintain processing stability.
+    - Provide structured error logging for troubleshooting.
     """
 
     def configure(self, config: Optional[Any] = None) -> None:
-        """Configure the processor with environment-specific settings."""
+        """
+        Sets internal configuration such as allowed roles, required fields, and record size limits.
+        Staging and production environments have more restrictive access controls.
+        
+        :param config: Optional configuration override.
+        """
         self.logger = logging.getLogger(__name__)
+        # Fallback to global config if no specific config is provided
         cfg = self.config if hasattr(self, "config") and self.config else get_config()
         env = getattr(cfg, "env", "dev")
 
+        # Define allowed roles based on the operational environment
         self._allowed_roles = (
             {"system", "service"}
             if env in {"staging", "prod"}
             else {"system", "service", "analyst"}
         )
+        # Prevent oversized records from causing memory issues in batch jobs
         self._max_record_size = 100_000
+        # Set of mandatory fields required for valid hedge effectiveness analysis
         self._required_fields = {
             "hedge_id", "hedge_pnl", "exposure_pnl"
         }
@@ -73,15 +102,12 @@ class Processor(BaseProcessor):
 
     def validate(self, record: Any) -> None:
         """
-        Validate the input record.
-
-        Args:
-            record: Record to validate
-
-        Raises:
-            TypeError: If record is not a dict
-            PermissionError: If access_role not permitted
-            ValueError: If required fields missing or record too large
+        Validates the input record's type, security role, and mandatory fields.
+        
+        :param record: The record to be validated.
+        :raises TypeError: If the record is not a dictionary.
+        :raises PermissionError: If the access role is not authorized.
+        :raises ValueError: If required fields are missing or the record is too large.
         """
         if not isinstance(record, dict):
             raise TypeError("record must be a dict")
@@ -89,6 +115,7 @@ class Processor(BaseProcessor):
         role = record.get("access_role")
         src = record.get("source")
 
+        # Security check: verify the caller has the necessary permissions
         if role not in self._allowed_roles:
             raise PermissionError(
                 f"access_role '{role}' not permitted. "

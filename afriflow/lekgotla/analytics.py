@@ -1,13 +1,9 @@
 """
-Lekgotla Analytics
-
-Platform health metrics, engagement analytics, and ROI tracking
-for the Lekgotla collective intelligence system.
-
-DISCLAIMER: This project is not a sanctioned initiative
-of Standard Bank Group, MTN, or any affiliated entity.
-It is a demonstration of concept, domain knowledge,
-and data engineering skill by Thabo Kunene.
+@file analytics.py
+@description Analytics engine for the Lekgotla module, tracking platform health,
+    user engagement, and ROI attribution from knowledge sharing activities.
+@author Thabo Kunene
+@created 2026-03-19
 """
 
 from __future__ import annotations

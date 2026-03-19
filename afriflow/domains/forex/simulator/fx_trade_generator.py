@@ -1,8 +1,8 @@
 """
 @file fx_trade_generator.py
-@description Synthetic FX trade generator modeling African market characteristics and seasonality
+@description Generator for synthetic FX trade records, modeling unique African market dynamics such as NDF dominance and central bank interventions.
 @author Thabo Kunene
-@created 2026-03-17
+@created 2026-03-19
 """
 
 """
@@ -28,17 +28,27 @@ project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
-from __future__ import annotations  # allow forward-referenced type hints for dataclasses
-import random  # stochastic variability for rates and notional sizes
-import uuid  # unique trade identifiers generation
-import logging  # operational telemetry for generation lifecycle
+# Enables postponed evaluation of type annotations for forward references
+from __future__ import annotations
+# Random library for stochastic variability in rates and notional sizes
+import random
+# UUID for generating unique trade and record identifiers
+import uuid
+# Standard logging for operational telemetry and audit trails
+import logging
+# Dataclasses for structured representation of FX trade records
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone  # UTC timestamps and date arithmetic
+# Datetime utilities for timestamping and date arithmetic
+from datetime import datetime, timedelta, timezone
+# Typing hints for defining strong collection and functional contracts
 from typing import Iterator, Optional, Dict, Any, List
 
-from afriflow.logging_config import get_logger  # centralized JSON logging with structured context
-from afriflow.domains.shared.interfaces import SimulatorBase  # base simulator contract for consistency
+# AfriFlow logging utility for consistent log formatting and traceability
+from afriflow.logging_config import get_logger
+# Base simulator class providing standard initialization and streaming methods
+from afriflow.domains.shared.interfaces import SimulatorBase
 
+# Initialize logger for the FX trade generator namespace
 logger = get_logger("domains.forex.simulator.fx_trade_generator")
 
 
@@ -46,17 +56,33 @@ logger = get_logger("domains.forex.simulator.fx_trade_generator")
 class FXTrade:
     """
     A single FX trade record.
+    Represents a currency exchange transaction between a client and the bank.
 
-    We publish these to the forex domain Kafka topic
-    (forex.fx_trades) in Avro format.
+    Attributes:
+        trade_id: Unique identifier for the trade.
+        client_id: Identifier of the corporate client.
+        client_golden_id: Resolved master identifier for the client.
+        trade_type: The nature of the instrument (spot, forward, swap, option, ndf).
+        currency_pair: The currency pair traded (e.g., 'USD/ZAR').
+        direction: Direction of the trade from the client's perspective (buy_usd, sell_usd).
+        notional_usd: The trade value converted to USD.
+        rate: The executed exchange rate.
+        value_date: ISO date when the funds are exchanged.
+        maturity_date: Optional ISO date for forward or option instruments.
+        is_hedge: Boolean flag indicating if the trade is part of a hedging strategy.
+        underlying_payment_id: Link to a specific payment being hedged.
+        country: The primary country where the trade originated.
+        traded_at: Precise ISO timestamp of the trade execution.
+        ingested_at: ISO timestamp when the record entered the system.
+        schema_version: Version of the record structure for schema registry compatibility.
     """
 
     trade_id: str
     client_id: str
     client_golden_id: Optional[str]
-    trade_type: str  # spot | forward | swap | option | ndf
+    trade_type: str
     currency_pair: str
-    direction: str  # buy_usd | sell_usd
+    direction: str
     notional_usd: float
     rate: float
     value_date: str
@@ -69,7 +95,7 @@ class FXTrade:
     schema_version: str = "1.0"
 
 
-# African currency pairs with typical characteristics
+# List of major African currency pairs actively traded in the CIB portfolio.
 AFRICAN_CURRENCY_PAIRS = [
     "USD/ZAR", "USD/NGN", "USD/KES", "USD/GHS", "USD/TZS",
     "USD/UGX", "USD/ZMW", "USD/MZN", "USD/AOA", "USD/XOF",
@@ -77,7 +103,7 @@ AFRICAN_CURRENCY_PAIRS = [
     "USD/NAD", "USD/ZWL", "USD/CDF", "USD/SSP"
 ]
 
-# Countries corresponding to currency pairs
+# Mapping of currency pairs to their primary markets for geographic reporting.
 PAIR_COUNTRIES = {
     "USD/ZAR": "South Africa", "USD/NGN": "Nigeria", "USD/KES": "Kenya",
     "USD/GHS": "Ghana", "USD/TZS": "Tanzania", "USD/UGX": "Uganda",
@@ -88,16 +114,16 @@ PAIR_COUNTRIES = {
     "USD/SSP": "South Sudan"
 }
 
-# Currencies with NDF (Non-Deliverable Forward) markets
+# Currencies where capital controls often require Non-Deliverable Forward (NDF) settlement.
 NDF_CURRENCIES = {"NGN", "KES", "GHS", "TZS", "UGX", "ZMW", "MZN", "AOA", "ETB", "ZWL", "CDF", "SSP"}
 
-# Typical trade sizes by currency (USD notional)
+# Typical trade size ranges (min, max USD) per currency pair based on liquidity.
 TYPICAL_NOTIONALS = {
-    "USD/ZAR": (100000, 5000000),     # Very liquid
-    "USD/NGN": (50000, 1000000),      # Liquid but controlled
+    "USD/ZAR": (100000, 5000000),     # Highly liquid
+    "USD/NGN": (50000, 1000000),      # Liquid but regulated
     "USD/KES": (25000, 500000),       # Moderate liquidity
-    "USD/GHS": (25000, 300000),       # Thin but active
-    "USD/TZS": (10000, 200000),       # Illiquid
+    "USD/GHS": (25000, 300000),       # Active but thin
+    "USD/TZS": (10000, 200000),       # Relatively illiquid
     "USD/UGX": (15000, 300000),       # Illiquid
     "USD/ZMW": (20000, 400000),       # Copper-linked
     "USD/MZN": (10000, 150000),       # Very thin

@@ -1,25 +1,10 @@
 """
 @file expansion_signal.py
-@description Cross-domain geographic expansion detection engine.
-
-             We detect when a corporate client is expanding into new geographic
-             markets by combining corroborating signals from:
-               - CIB     : New payment corridors to foreign countries
-               - Cell    : New SIM activations in new countries
-               - Forex   : New currency hedging activity for expansion countries
-               - Insurance: New country-level coverage
-               - PBB     : New payroll accounts in expansion countries
-
-             A single domain signal is weak evidence; multiple corroborating
-             signals produce high-confidence alerts. Confidence is scored out
-             of 99 and signals below 40 are silently discarded.
-
-             DISCLAIMER: This project is not sanctioned by, affiliated with, or
-             endorsed by Standard Bank Group, MTN Group, or any affiliated entity.
-             It is a demonstration of concept, domain knowledge, and data
-             engineering skill by Thabo Kunene.
+@description Cross-domain geographic expansion detection engine, identifying
+    new market entry by combining corroborating signals from CIB, Cell, Forex,
+    Insurance, and PBB domains.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 # Allow forward references in type hints (e.g. Optional["ExpansionSignal"])

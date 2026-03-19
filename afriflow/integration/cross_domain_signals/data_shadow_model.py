@@ -1,24 +1,9 @@
 """
 @file data_shadow_model.py
-@description Data shadow model for detecting meaningful data absences.
-
-             In developed markets, missing data is an error to fix.
-             In African markets, the absence of expected data is itself a signal.
-             We compute the expected data footprint for each client and generate
-             intelligence from the gaps.
-
-             The key insight: if CIB shows a client paying suppliers in Kenya, we
-             expect to see KES in their forex book, Kenyan SIMs in their cell data,
-             Kenyan insurance coverage, and Kenyan payroll deposits. Every absence
-             is a signal — and each signal type maps to a specific revenue
-             opportunity or compliance concern.
-
-             DISCLAIMER: This project is not sanctioned by, affiliated with, or
-             endorsed by Standard Bank Group, MTN Group, or any affiliated entity.
-             It is a demonstration of concept, domain knowledge, and data
-             engineering skill by Thabo Kunene.
+@description Data shadow engine for detecting meaningful data absences across domains,
+    generating intelligence signals from gaps between expected and actual client footprints.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 # Standard-library imports

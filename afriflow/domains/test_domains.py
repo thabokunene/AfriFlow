@@ -1,4 +1,11 @@
 """
+@file test_domains.py
+@description Comprehensive unit test suite for the shared domain components and configurations in AfriFlow.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Unit Tests for Domains Module.
 
 We test all domain modules to ensure correctness,
@@ -10,24 +17,31 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
+# Pytest framework for running unit and integration tests
 import pytest
+# Standard library for interacting with the operating system (e.g., env variables)
 import os
+# Datetime utilities for time-based testing and validation
 from datetime import datetime, timedelta, timezone
+# Typing hints for improved code clarity and static analysis
 from typing import Dict, Any
 
-# Import modules under test
+# Core application configuration management and singleton access
 from afriflow.domains.shared.config import AppConfig, get_config, reset_config
+# Currency and country mapping utilities for multi-market data processing
 from afriflow.domains.shared.currency_map import (
     get_currency_for_country,
     get_country_for_currency,
     is_major_currency,
     is_african_currency,
 )
+# Deflation factors for SIM usage normalization in telecom analytics
 from afriflow.domains.shared.sim_deflation_factors import (
     get_deflation_factor,
     get_deflation_confidence,
     get_avg_sims_per_person,
 )
+# System-wide constants for messaging, formats, and business thresholds
 from afriflow.domains.shared.constants import (
     ISO_DATE_FORMAT,
     TOPIC_CIB_PAYMENTS,
@@ -36,67 +50,107 @@ from afriflow.domains.shared.constants import (
 
 
 class TestConfig:
-    """Tests for configuration module."""
+    """
+    Test suite for the configuration management module.
+    Ensures that environment variables are correctly loaded and validated.
+    """
 
     def setup_method(self) -> None:
-        """Reset config before each test."""
+        """
+        Setup hook that runs before each test method in this class.
+        Resets the configuration singleton to ensure test isolation.
+        """
         reset_config()
 
     def test_config_load_defaults(self) -> None:
-        """Test configuration loads with defaults."""
+        """
+        Verifies that the configuration loads default values correctly
+        when no environment overrides are provided.
+        """
+        # Load the configuration object with defaults
         config = AppConfig.load()
 
+        # Assert default environment and connectivity settings
         assert config.env == "dev"
         assert config.kafka_broker == "localhost:9092"
         assert "localhost:8081" in config.schema_registry_url
 
     def test_config_from_env(self, monkeypatch: Any) -> None:
-        """Test configuration from environment variables."""
+        """
+        Verifies that environment variables correctly override default
+        configuration values using pytest's monkeypatch.
+        
+        :param monkeypatch: Pytest fixture for mocking environment variables.
+        """
+        # Mock environment variables for production scenario
         monkeypatch.setenv("APP_ENV", "prod")
         monkeypatch.setenv("KAFKA_BROKER", "kafka.prod:9092")
 
+        # Reload configuration to pick up mocked environment
         config = AppConfig.load()
 
+        # Assert that the overrides were applied
         assert config.env == "prod"
         assert config.kafka_broker == "kafka.prod:9092"
 
     def test_config_validate(self) -> None:
-        """Test configuration validation."""
+        """
+        Tests the configuration validation logic to ensure it doesn't 
+        raise exceptions for valid default setups.
+        """
         config = AppConfig.load()
-        config.validate()  # Should not raise
+        # Should complete without raising validation errors
+        config.validate()
 
     def test_get_config_singleton(self) -> None:
-        """Test get_config returns singleton."""
+        """
+        Ensures that get_config implements a singleton pattern correctly.
+        """
+        # Retrieve two instances and verify they are the same object in memory
         config1 = get_config()
         config2 = get_config()
 
         assert config1 is config2
 
     def test_reset_config(self) -> None:
-        """Test config reset."""
+        """
+        Verifies that reset_config clears the current singleton instance.
+        """
+        # Initialize the config
         get_config()
+        # Reset the singleton state
         reset_config()
 
-        # Should create new instance
+        # Verify that a subsequent call creates a new instance
         new_config = get_config()
         assert new_config is not None
 
 
 class TestCurrencyMap:
-    """Tests for currency mapping module."""
+    """
+    Test suite for currency and country mapping logic.
+    Ensures accuracy in cross-border financial data processing.
+    """
 
     def test_get_currency_for_country(self) -> None:
-        """Test country to currency mapping."""
+        """
+        Tests the mapping of ISO country codes to their primary currencies.
+        """
+        # Test common African markets: South Africa, Nigeria, Kenya
         assert get_currency_for_country("ZA") == "ZAR"
         assert get_currency_for_country("NG") == "NGN"
         assert get_currency_for_country("KE") == "KES"
 
     def test_get_currency_unknown_country(self) -> None:
-        """Test unknown country returns USD."""
+        """
+        Ensures that unknown country codes fallback to USD as a safe default.
+        """
         assert get_currency_for_country("XX") == "USD"
 
     def test_get_country_for_currency(self) -> None:
-        """Test currency to country mapping."""
+        """
+        Tests the reverse mapping from currency codes back to primary countries.
+        """
         assert get_country_for_currency("ZAR") == "ZA"
         assert get_country_for_currency("NGN") == "NG"
 

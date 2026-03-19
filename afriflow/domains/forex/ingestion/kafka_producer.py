@@ -1,4 +1,11 @@
 """
+@file kafka_producer.py
+@description Kafka producer for Forex domain ingestion, providing schema validation for FX trades, rate ticks, and hedges.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Forex Kafka Producer.
 
 We produce FX events (trades, rate ticks, hedges) to Kafka topics.
@@ -9,60 +16,79 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
+# Type hinting for defining strong collection and functional contracts
 from typing import Dict, Any, Optional, List
+# Standard logging for operational observability and audit trails
 import logging
+# Standard library for JSON encoding/decoding of FX payloads
 import json
+# Regular expression support for schema validation of IDs and codes
 import re
 
+# Initialize module-level logger for Forex ingestion events
 logger = logging.getLogger(__name__)
 
 
-# Trade schema validation constants
+# Set of mandatory fields for FX trade records.
+# Ensures structural integrity before streaming to trade analytics.
 REQUIRED_TRADE_FIELDS = {
     "trade_id", "currency_pair", "trade_type", "direction",
     "base_amount", "quote_amount", "rate", "trade_date",
     "value_date", "client_id", "status"
 }
 
-# Rate tick validation constants
+# Set of mandatory fields for real-time rate ticks.
+# Critical for high-frequency pricing and anomaly detection.
 REQUIRED_RATE_FIELDS = {
     "tick_id", "currency_pair", "mid_rate", "bid_rate",
     "ask_rate", "tick_timestamp"
 }
 
-# Hedge validation constants
+# Set of mandatory fields for FX hedging instruments.
+# Used to track client risk mitigation strategies.
 REQUIRED_HEDGE_FIELDS = {
     "hedge_id", "client_id", "currency_pair", "hedge_type",
     "notional_base", "strike_rate", "inception_date", "maturity_date"
 }
 
-# Validation patterns
+# Regex pattern for currency pairs (e.g., 'USD/ZAR').
 CURRENCY_PAIR_PATTERN = re.compile(r"^[A-Z]{3}/[A-Z]{3}$")
+# Regex pattern for three-letter ISO currency codes (e.g., 'USD').
 CURRENCY_CODE_PATTERN = re.compile(r"^[A-Z]{3}$")
+# Regex pattern for unique trade identifiers.
 TRADE_ID_PATTERN = re.compile(r"^FX-[A-Z0-9]{10}$")
+# Regex pattern for unique hedge identifiers.
 HEDGE_ID_PATTERN = re.compile(r"^HEDGE-[A-Z0-9]{10}$")
 
-# Valid values
+# Permitted product types for FX trades.
 VALID_TRADE_TYPES = {"SPOT", "FORWARD", "SWAP", "OPTION"}
+# Permitted transaction directions.
 VALID_DIRECTIONS = {"BUY", "SELL"}
+# Lifecycle statuses for an FX trade.
 VALID_TRADE_STATUSES = {"PENDING", "SETTLED", "FAILED", "CANCELLED"}
+# Permitted hedging strategies and instrument types.
 VALID_HEDGE_TYPES = {"FORWARD", "OPTION_CALL", "OPTION_PUT", "SWAP", "COLLAR"}
+# Lifecycle statuses for a hedging instrument.
 VALID_HEDGE_STATUSES = {"ACTIVE", "SETTLED", "TERMINATED", "EXPIRED"}
 
 
 class KafkaProducerError(Exception):
-    """Custom exception for Kafka producer errors."""
+    """
+    Base exception for all Forex Kafka producer errors.
+    """
     pass
 
 
 class ValidationError(KafkaProducerError):
-    """Exception raised when data validation fails."""
+    """
+    Exception raised when an FX event fails schema or business rule validation.
+    """
     pass
 
 
 class ForexKafkaProducer:
     """
-    Produces FX events to Kafka topics.
+    Handles the production of validated Forex events to Kafka topics.
 
     Supports:
     - FX trades (forex.trades)
@@ -70,8 +96,9 @@ class ForexKafkaProducer:
     - Hedge instruments (forex.hedges)
 
     Attributes:
-        topic: Kafka topic name
-        producer: Kafka producer instance
+        topic: The target Kafka topic for the current producer instance.
+        bootstrap_servers: Comma-separated list of Kafka broker addresses.
+        producer: The underlying Kafka client instance.
     """
 
     def __init__(
@@ -80,14 +107,11 @@ class ForexKafkaProducer:
         bootstrap_servers: str = "localhost:9092"
     ) -> None:
         """
-        Initialize the Kafka producer.
+        Initializes the Forex Kafka producer with connection and topic details.
 
-        Args:
-            topic: Kafka topic name
-            bootstrap_servers: Kafka broker addresses
-
-        Raises:
-            ValueError: If topic or bootstrap_servers is invalid
+        :param topic: Target Kafka topic. Defaults to 'forex.trades'.
+        :param bootstrap_servers: Kafka broker connection string.
+        :raises ValueError: If topic or bootstrap_servers are empty or invalid types.
         """
         if not topic or not isinstance(topic, str):
             raise ValueError("topic must be a non-empty string")

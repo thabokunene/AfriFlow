@@ -1,4 +1,11 @@
 """
+@file order_book_simulator.py
+@description Generator for synthetic FX order book levels, simulating market depth and liquidity pressure for African currency pairs.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Order Book Simulator
 
 We generate realistic synthetic order book levels for
@@ -15,16 +22,25 @@ Group project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
+# Enables postponed evaluation of type annotations for forward references
 from __future__ import annotations
+# Random library for stochastic price and size variability in order book levels
 import random
+# Standard logging for operational telemetry and audit trails
 import logging
+# Dataclasses for structured representation of order book level records
 from dataclasses import dataclass
+# Datetime utilities for timestamping generated levels
 from datetime import datetime, timezone
+# Typing hints for defining strong functional and collection contracts
 from typing import Iterator, List, Literal, Optional, Dict
 
+# AfriFlow logging utility for consistent log formatting and traceability
 from afriflow.logging_config import get_logger
+# Base simulator class providing standard initialization and streaming methods
 from afriflow.domains.shared.interfaces import SimulatorBase
 
+# Initialize logger for the order book simulator namespace
 logger = get_logger("domains.forex.simulator.order_book_simulator")
 
 
@@ -32,9 +48,15 @@ logger = get_logger("domains.forex.simulator.order_book_simulator")
 class OrderBookLevel:
     """
     A single order book level record.
+    Represents an available price and volume on either the bid or ask side.
 
-    We publish these to the forex domain Kafka topic
-    (forex.order_book) for market microstructure analysis.
+    Attributes:
+        currency_pair: The currency pair for this level (e.g., 'USD/ZAR').
+        side: Indicates if the level is on the 'bid' or 'ask' side.
+        price: The exchange rate for this specific level.
+        size_musd: Available volume at this price in millions of USD.
+        timestamp: The precise ISO timestamp of the level generation.
+        sequence_num: Monotonically increasing sequence number per currency pair.
     """
 
     currency_pair: str
@@ -47,22 +69,23 @@ class OrderBookLevel:
 
 class OrderBookSimulator(SimulatorBase):
     """
-    We generate realistic synthetic order book data
-    for testing and demo purposes.
+    Generator for realistic synthetic order book data.
+    Useful for testing microstructure analytics and trade execution strategies.
 
     Usage:
-        gen = OrderBookSimulator(seed=42)
+        gen = OrderBookSimulator()
         level = gen.generate_one(currency_pair="USD/ZAR")
     """
 
-    # Base mid prices for major pairs (indicative)
+    # Indicative base mid prices for major and African currency pairs.
     BASE_PRICES = {
         "USD/ZAR": 18.50, "USD/NGN": 1580.0, "USD/KES": 130.0,
         "USD/GHS": 15.5, "EUR/ZAR": 20.0, "GBP/ZAR": 23.5,
         "ZAR/NGN": 85.4, "EUR/USD": 1.08, "GBP/USD": 1.27,
     }
 
-    # Typical spread by pair (in pips)
+    # Typical bid-ask spreads in pips per currency pair based on market liquidity.
+    # African pairs typically have wider spreads than G10 currencies.
     SPREAD_PIPS = {
         "USD/ZAR": 50, "USD/NGN": 200, "USD/KES": 100,
         "USD/GHS": 300, "EUR/ZAR": 60, "GBP/ZAR": 70,
@@ -70,32 +93,46 @@ class OrderBookSimulator(SimulatorBase):
     }
 
     def __init__(self, seed: Optional[int] = None, config=None):
+        """
+        Initializes the order book simulator.
+
+        :param seed: Optional random seed for deterministic generation.
+        :param config: Optional AppConfig override.
+        """
         if seed is not None:
             random.seed(seed)
+        # Internal state to track the next sequence number per currency pair.
         self._sequence: Dict[str, int] = {}
         logger.info("OrderBookSimulator initialized")
         super().__init__(config)
 
     def initialize(self, config=None) -> None:
-        """Initialize the simulator with default pairs."""
+        """
+        Sets up the internal state including active currency pairs.
+        
+        :param config: Optional configuration object.
+        """
         self._pairs = list(self.BASE_PRICES.keys())
         logger.info("OrderBookSimulator configuration loaded")
 
     def validate_input(self, **kwargs) -> None:
         """
-        Validate input parameters.
-
-        Raises:
-            ValueError: If currency_pair is invalid or side is malformed
+        Validates input parameters before level generation.
+        
+        :param kwargs: Keyword arguments to validate.
+        :raises ValueError: If the currency pair, side, or size is invalid.
         """
+        # Ensure the currency pair is in our registry.
         pair = kwargs.get("currency_pair")
         if pair is not None and pair not in self._pairs:
             raise ValueError(f"Unsupported currency_pair: {pair}")
 
+        # Ensure the side is either 'bid' or 'ask'.
         side = kwargs.get("side")
         if side is not None and side not in ("bid", "ask"):
             raise ValueError("side must be 'bid' or 'ask'")
 
+        # Guard against non-positive order sizes.
         size = kwargs.get("size_musd")
         if size is not None and size <= 0:
             raise ValueError("size_musd must be positive")

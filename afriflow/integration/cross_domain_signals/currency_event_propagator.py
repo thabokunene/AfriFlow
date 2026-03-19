@@ -1,24 +1,10 @@
 """
 @file currency_event_propagator.py
-@description Currency event propagation engine for African FX markets.
-
-             When a major currency event occurs (devaluation, capital control
-             change, central bank intervention), we immediately recalculate the
-             impact across all five domains for every affected client.
-
-             In Africa, FX volatility is not an isolated risk — it cascades
-             across CIB, Forex, Insurance, Cell, and PBB simultaneously. This
-             engine fills the critical gap that Western FX architectures miss:
-             a naira devaluation does not just affect the FX desk; it impacts
-             CIB facility adequacy, insurance coverage, payroll purchasing
-             power, and telco JV revenue all at once.
-
-             DISCLAIMER: This project is not sanctioned by, affiliated with, or
-             endorsed by Standard Bank Group, MTN Group, or any affiliated entity.
-             It is a demonstration of concept, domain knowledge, and data
-             engineering skill by Thabo Kunene.
+@description Currency event propagation engine for African FX markets,
+    calculating cross-domain impacts (CIB, Forex, Insurance, Cell, PBB)
+    after major currency devaluations or capital control changes.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 # Standard-library imports

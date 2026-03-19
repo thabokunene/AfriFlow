@@ -1,14 +1,10 @@
 """
 @file entity_graph.py
-@description Entity Relationship Graph for the AfriFlow entity resolution layer.
-             Maintains a lightweight adjacency-list directed graph of resolved
-             entities and their relationships. Supports connected-component
-             clustering, BFS shortest-path analysis, key-connector identification
-             (hub entities with high degree centrality), and multi-hop traversal
-             for hidden related-party discovery. All operations use only the Python
-             standard library — no networkx dependency required.
+@description Entity relationship graph for the AfriFlow entity resolution layer,
+    maintaining a directed weighted graph of resolved entities to support
+    connected-component clustering, traversal, and hidden relationship discovery.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 from collections import deque   # used for BFS queue in traversal methods

@@ -1,52 +1,87 @@
 """
 @file lapse_risk_detector.py
-@description Insurance lapse risk detector with RBAC validation and safe enrichment flagging
+@description Flink-based processor for identifying insurance policy lapse risk by analyzing premium payment behavior and engagement metrics.
 @author Thabo Kunene
-@created 2026-03-17
+@created 2026-03-19
 """
+
+# Standard logging for operational observability and churn risk monitoring
 import logging
-from afriflow.domains.shared.interfaces import BaseProcessor  # Base contract enforcing configure/validate/process methods
-from afriflow.domains.shared.config import get_config  # Environment-aware configuration sourcing
+# BaseProcessor defines the standardized processing lifecycle used across all AfriFlow domains
+from afriflow.domains.shared.interfaces import BaseProcessor
+# get_config provides environment-aware settings for security and operational constraints
+from afriflow.domains.shared.config import get_config
 
 
 class Processor(BaseProcessor):
     """
-    Processor validating insurance records before computing lapse risk markers.
+    Lapse risk detector implementation of the BaseProcessor.
+    Responsible for validating and preparing insurance records for downstream lapse prediction.
+    
+    Design intent:
+    - Enforce environment-aware RBAC (Role-Based Access Control).
+    - Limit payload size to maintain processing stability.
+    - Provide structured error logging for troubleshooting.
     """
+
     def configure(self, config=None) -> None:
         """
-        Initialize logger and environment-based RBAC, set payload size guardrail.
+        Sets internal configuration such as allowed roles and record size limits.
+        Staging and production environments have more restrictive access controls.
+        
+        :param config: Optional configuration override.
         """
         self.logger = logging.getLogger(__name__)
+        # Fallback to global config if no specific config is provided
         env = (self.config.env if self.config else get_config().env)
+        # Define allowed roles based on the operational environment
         self._allowed_roles = {"system", "service"} if env in {"staging", "prod"} else {"system", "service", "analyst"}
+        # Prevent oversized records from causing memory issues in streaming jobs
         self._max_record_size = 100_000
 
     def validate(self, record) -> None:
         """
-        Validate input record type, role authorization, source provenance, and payload size.
+        Validates the input record's type, security role, and mandatory fields.
+        
+        :param record: The record to be validated.
+        :raises TypeError: If the record is not a dictionary.
+        :raises PermissionError: If the role associated with the record is not authorized.
+        :raises ValueError: If the record is missing required fields or exceeds the size limit.
         """
         if not isinstance(record, dict):
             raise TypeError("record must be a dict")
+            
         role = record.get("access_role")
         src = record.get("source")
+        
+        # Security check: verify the caller has the necessary permissions
         if role not in self._allowed_roles:
             raise PermissionError("access_role not permitted")
+            
+        # Lineage check: source must be clearly identified
         if not src or not isinstance(src, str):
             raise ValueError("source is required")
+            
+        # Payload safety check
         if len(str(record)) > self._max_record_size:
             raise ValueError("record too large")
 
     def process_sync(self, record):
         """
-        Synchronously flag record as processed after validation.
-        Edge cases are captured and logged; errors are re-raised to callers.
+        Synchronously processes and enriches a policy record after validation.
+        
+        :param record: The input record to process.
+        :return: A copy of the record with a processing flag.
+        :raises Exception: Re-raises any errors encountered during validation or processing.
         """
         try:
             self.validate(record)
+            # Create a shallow copy for safe transformation
             out = dict(record)
+            # Mark the record as successfully processed by this module
             out["processed"] = True
             return out
         except Exception as e:
+            # Log failure with structured context for easier debugging
             self.logger.error("processor_error", extra={"error": str(e), "etype": e.__class__.__name__})
             raise

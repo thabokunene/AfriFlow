@@ -1,11 +1,9 @@
 # =============================================================================
 # @file schema.yml
-# @description PBB (Personal and Business Banking) domain dbt schema definitions
-#     for retail banking data models including customer accounts, transactions,
-#     and behavioral analytics. Defines data quality tests and business validation
-#     rules for personal banking data pipelines.
+# @description dbt schema definitions for the PBB domain, including retail
+#     banking accounts, payroll processing, and customer behavioral models.
 # @author Thabo Kunene
-# @created 2026-03-18
+# @created 2026-03-19
 # =============================================================================
 
 version: 2
@@ -13,8 +11,8 @@ version: 2
 #
 # PBB Domain dbt Schema Definitions
 #
-# We define tests, documentation, and column metadata
-# for all PBB domain models.
+# These definitions provide metadata and data quality tests for PBB models,
+# ensuring data integrity for retail and payroll analytics.
 #
 # Disclaimer: This project is not sanctioned by Standard Bank Group.
 #

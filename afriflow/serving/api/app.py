@@ -1,31 +1,10 @@
 """
-AfriFlow Intelligence API
-
-We expose the cross-domain client intelligence layer
-via a FastAPI application.
-
-Endpoints:
-
-  GET  /health                   – liveness probe
-  GET  /clients/{golden_id}      – unified golden record
-  GET  /clients/{golden_id}/briefing – pre-meeting briefing
-  GET  /clients/{golden_id}/nba  – next best action
-  POST /signals/expansion        – expansion signal query
-  POST /signals/shadow           – data shadow query
-  GET  /currency-events/active   – active FX events
-  POST /currency-events/propagate – propagate an event
-
-Authentication: Bearer token (JWT) – see auth_middleware.
-Audit: Every request is logged – see audit_middleware.
-
-POPIA note: All PII fields are stripped before
-cross-border API calls. The API is deployed per
-country pod. The central hub only receives aggregated
-and de-identified signals.
-
-Disclaimer: This is not a sanctioned Standard Bank
-Group project. Built by Thabo Kunene for portfolio
-purposes. All data is simulated.
+@file app.py
+@description Main FastAPI application for the AfriFlow Intelligence API,
+    exposing cross-domain client intelligence, pre-meeting briefings, and
+    real-time currency event propagation endpoints.
+@author Thabo Kunene
+@created 2026-03-19
 """
 
 import json

@@ -1,14 +1,10 @@
 """
 @file __init__.py
-@description Package init for the entity_resolution integration module.
-             Exposes all public classes and data types for cross-domain
-             entity resolution: multilingual name normalisation, corporate
-             subsidiary linkage, human-in-the-loop match verification,
-             an entity relationship graph, client fuzzy matching, and
-             golden ID generation. Callers import from this package root
-             rather than from individual sub-modules.
+@description Initialization for the entity resolution integration module,
+    providing cross-domain identity matching, multilingual name normalization,
+    and corporate subsidiary linkage for a unified golden record.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 # Multilingual normaliser: handles English, Swahili, Yoruba, Hausa,

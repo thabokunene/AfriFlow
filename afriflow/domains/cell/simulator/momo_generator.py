@@ -1,4 +1,11 @@
 """
+@file momo_generator.py
+@description Generator for synthetic Mobile Money (MoMo) transactions, simulating P2P, P2B, B2P, and cross-border flows.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Mobile Money (MoMo) Transaction Generator
 
 We generate realistic synthetic MoMo transaction
@@ -37,26 +44,33 @@ Group or MTN Group project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
+# Standard math library for calculating distributions and transaction amounts
 import math
+# Random library for stochastic event generation based on market profiles
 import random
+# UUID for generating unique transaction and record identifiers
 import uuid
+# Dataclass for structured representation of MoMo transaction events
 from dataclasses import dataclass
+# Datetime utilities for timestamping generated events and simulating cycles
 from datetime import datetime, timedelta, timezone
+# Typing hints for defining strong functional and collection contracts
 from typing import Dict, Iterator, List, Optional
 
 
-# Country-specific MoMo market characteristics
+# Country-specific MoMo market characteristics used to bias the simulation.
+# These profiles ensure that generated data reflects real-world market maturity and behavior.
 MOMO_MARKET_PROFILE: Dict[str, Dict] = {
     "NG": {
         "avg_transaction_usd": 12.0,
         "daily_volume_multiplier": 1.4,
-        "salary_day": 25,           # 25th of month
-        "merchant_pct": 0.30,       # 30% of txns are P2B
+        "salary_day": 25,           # Typical 25th of month salary cycle in Nigeria
+        "merchant_pct": 0.30,       # 30% of transactions are Person-to-Business
         "intl_pct": 0.08,
         "primary_corridor_to": ["GH", "CI", "CM"],
     },
     "KE": {
-        "avg_transaction_usd": 18.0,  # M-Pesa more mature
+        "avg_transaction_usd": 18.0,  # Higher average due to M-Pesa maturity
         "daily_volume_multiplier": 1.8,
         "salary_day": 28,
         "merchant_pct": 0.45,

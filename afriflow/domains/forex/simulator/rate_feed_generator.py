@@ -1,4 +1,11 @@
 """
+@file rate_feed_generator.py
+@description Generator for synthetic FX rate ticks, modeling unique African market dynamics such as regime changes, parallel markets, and thin liquidity.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 FX Rate Feed Generator
 
 We generate realistic synthetic FX rate ticks for
@@ -25,15 +32,20 @@ Thabo Kunene for portfolio purposes. All data is
 simulated.
 """
 
+# Random library for stochastic price movements using geometric Brownian motion
 import random
+# UUID for generating unique tick and record identifiers
 import uuid
+# Dataclasses for structured representation of rate ticks and market states
 from dataclasses import dataclass, field
+# Datetime utilities for timestamping generated rate ticks
 from datetime import datetime, timedelta, timezone
+# Typing hints for defining strong functional and collection contracts
 from typing import Dict, Iterator, List, Optional
 
 
 # Base rates (approximate mid-market, vs USD).
-# Representative starting points for simulation only.
+# These serve as the initial price anchor for the simulation across African markets.
 BASE_RATES_VS_USD: Dict[str, float] = {
     "ZAR": 18.50,
     "NGN": 1580.0,
@@ -56,7 +68,8 @@ BASE_RATES_VS_USD: Dict[str, float] = {
     "SSP": 1300.0,   # South Sudan – very thin market
 }
 
-# Annualised volatility (%) per currency.
+# Annualised volatility (%) per currency used to scale the random walk.
+# Reflects the historical price stability or risk profile of each currency.
 ANNUAL_VOLATILITY: Dict[str, float] = {
     "ZAR": 12.0,
     "NGN": 25.0,    # Structural devaluation risk
@@ -79,8 +92,8 @@ ANNUAL_VOLATILITY: Dict[str, float] = {
     "SSP": 40.0,
 }
 
-# Bid-ask spread as % of mid (half-spread each side).
-# Illiquid African pairs have wide spreads.
+# Bid-ask spread as % of mid-price (half-spread each side).
+# Widening spreads reflect lower liquidity or higher transactional risk.
 BID_ASK_SPREAD_PCT: Dict[str, float] = {
     "ZAR": 0.03,
     "NGN": 0.25,

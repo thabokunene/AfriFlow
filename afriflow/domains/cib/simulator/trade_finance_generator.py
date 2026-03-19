@@ -1,4 +1,11 @@
 """
+@file trade_finance_generator.py
+@description Generator for synthetic CIB trade finance records, simulating letters of credit, guarantees, and documentary collections.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Trade Finance Record Generator
 
 We generate realistic synthetic trade finance records
@@ -38,16 +45,25 @@ project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
+# Standard math library for calculating transaction amounts and distributions
 import math
+# Random library for stochastic event generation based on market profiles
 import random
+# UUID for generating unique transaction and record identifiers
 import uuid
+# Dataclass for structured representation of trade finance records
 from dataclasses import dataclass
+# Datetime utilities for timestamping generated events
 from datetime import datetime, timedelta, timezone
+# Typing hints for defining strong functional and collection contracts
 from typing import Dict, Iterator, List, Optional
 
+# Custom exception for configuration-related failures in the generator
 from afriflow.exceptions import ConfigurationError
+# AfriFlow logging utility for consistent log formatting and traceability
 from afriflow.logging_config import get_logger
 
+# Initialize module-level logger for the trade finance simulator
 logger = get_logger(__name__)
 
 
@@ -56,6 +72,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 # Key commodity exports by country.
+# These profiles define the primary economic activities for each African market.
 COMMODITY_CORRIDORS: Dict[str, List[str]] = {
     "NG": ["crude_oil", "cocoa", "sesame", "cashew"],
     "ZA": ["gold", "platinum", "coal", "manganese", "chrome"],
@@ -71,8 +88,8 @@ COMMODITY_CORRIDORS: Dict[str, List[str]] = {
     "RW": ["coffee", "tea", "minerals"],
 }
 
-# Active trade corridors: typical beneficiary countries
-# per commodity origin.
+# Active trade corridors: typical beneficiary countries per commodity origin.
+# These destinations reflect actual global trade routes for major African exports.
 COMMODITY_DESTINATIONS: Dict[str, List[str]] = {
     "crude_oil":   ["CN", "IN", "US", "NL", "SG"],
     "cocoa":       ["NL", "DE", "CH", "US", "BE"],
@@ -89,7 +106,8 @@ COMMODITY_DESTINATIONS: Dict[str, List[str]] = {
     "diamonds":    ["BE", "AE", "IN", "US"],
 }
 
-# Instrument types and their typical characteristics
+# Instrument types and their typical financial characteristics.
+# Used to bias the simulation towards realistic amounts and tenors.
 INSTRUMENT_CONFIGS: Dict[str, Dict] = {
     "letter_of_credit": {
         "min_amount_usd":    50_000,

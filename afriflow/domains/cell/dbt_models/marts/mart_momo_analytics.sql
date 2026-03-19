@@ -1,3 +1,9 @@
+/*
+ * @file mart_momo_analytics.sql
+ * @description dbt mart model for Mobile Money (MoMo) analytics, tracking salary disbursements, supplier payments, and cross-border flows.
+ * @author Thabo Kunene
+ * @created 2026-03-19
+ */
 {{
     config(
         materialized='table',
@@ -27,39 +33,48 @@
         - Cross-border payment intelligence
 */
 
+-- CTE to pull raw MoMo transaction data from the source.
 WITH raw_momo AS (
     SELECT * FROM {{ source('cell', 'momo_raw') }}
 ),
 
--- Cleaned MoMo transactions
+-- CTE to clean and normalize raw MoMo transactions for reliable aggregation.
 cleaned AS (
     SELECT
+        -- Identifiers and metadata.
         TRIM(transaction_id) AS transaction_id,
         UPPER(TRIM(transaction_type)) AS transaction_type,
+        -- Sender details (Hashed for privacy compliance).
         TRIM(sender_msisdn_hash) AS sender_msisdn_hash,
         TRIM(sender_account_hash) AS sender_account_hash,
         UPPER(TRIM(sender_country)) AS sender_country,
         TRIM(sender_region) AS sender_region,
         UPPER(TRIM(sender_type)) AS sender_type,
+        -- Receiver details (Hashed for privacy compliance).
         TRIM(receiver_msisdn_hash) AS receiver_msisdn_hash,
         TRIM(receiver_account_hash) AS receiver_account_hash,
         UPPER(TRIM(receiver_country)) AS receiver_country,
         TRIM(receiver_region) AS receiver_region,
         UPPER(TRIM(receiver_type)) AS receiver_type,
+        -- Linkage to corporate clients.
         TRIM(corporate_client_id) AS corporate_client_id,
         COALESCE(is_salary_disbursement, FALSE) AS is_salary_disbursement,
         COALESCE(is_supplier_payment, FALSE) AS is_supplier_payment,
+        -- Financial metrics.
         CAST(amount AS DECIMAL(18,2)) AS amount,
         UPPER(TRIM(currency)) AS currency,
         CAST(fee_amount AS DECIMAL(10,2)) AS fee_amount,
+        -- Temporal data normalization.
         CASE
             WHEN transaction_date ~ '^\d{4}-\d{2}-\d{2}$'
             THEN CAST(transaction_date AS DATE)
             ELSE NULL
         END AS transaction_date,
         TRIM(transaction_time) AS transaction_time,
+        -- Status and channel information.
         UPPER(TRIM(transaction_status)) AS transaction_status,
         UPPER(TRIM(channel)) AS channel,
+        -- Agent intelligence.
         TRIM(agent_id_hash) AS agent_id_hash,
         TRIM(agent_location) AS agent_location,
         _ingested_at,
@@ -69,7 +84,7 @@ cleaned AS (
       AND amount > 0
 ),
 
--- Daily aggregation per corporate
+-- CTE to aggregate MoMo metrics at a daily granularity per corporate client and country.
 daily_corporate AS (
     SELECT
         corporate_client_id,
@@ -78,12 +93,15 @@ daily_corporate AS (
         COUNT(*) AS transaction_count,
         SUM(amount) AS transaction_value,
         SUM(fee_amount) AS fee_revenue,
+        -- Count unique participants to gauge network size.
         COUNT(DISTINCT sender_account_hash) AS unique_senders,
         COUNT(DISTINCT receiver_account_hash) AS unique_receivers,
+        -- Specific aggregation for economic proxies (salary and supplier payments).
         COUNT(CASE WHEN is_salary_disbursement THEN 1 END) AS salary_count,
         SUM(CASE WHEN is_salary_disbursement THEN amount ELSE 0 END) AS salary_value,
         COUNT(CASE WHEN is_supplier_payment THEN 1 END) AS supplier_count,
         SUM(CASE WHEN is_supplier_payment THEN amount ELSE 0 END) AS supplier_value,
+        -- Identification of cross-border remittances.
         COUNT(CASE WHEN sender_country != receiver_country THEN 1 END) AS cross_border_count,
         SUM(CASE WHEN sender_country != receiver_country THEN amount ELSE 0 END) AS cross_border_value,
         MAX(currency) AS currency
@@ -96,7 +114,7 @@ daily_corporate AS (
         transaction_date
 ),
 
--- Monthly aggregation with trends
+-- Monthly aggregation with trends (Note: the original file ends here in the snippet).
 monthly_corporate AS (
     SELECT
         corporate_client_id,

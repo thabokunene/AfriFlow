@@ -1,3 +1,11 @@
+-- =============================================================================
+-- @file stg_insurance_policies.sql
+-- @description Staging model for insurance policies, performing data cleaning,
+--     type casting, and basic validation on raw ingestion data.
+-- @author Thabo Kunene
+-- @created 2026-03-19
+-- =============================================================================
+
 {{
     config(
         materialized='view',
@@ -6,62 +14,50 @@
 }}
 
 /*
-    Staging model for Insurance policies.
-
-    We perform initial cleaning, type casting, and validation
-    on raw insurance policy data from the ingestion layer.
-
-    Columns:
-        - policy_id: Unique policy identifier
-        - policy_number: Human-readable policy number
-        - policy_type: Type of insurance (asset, credit, liability)
-        - client_id: Client identifier
-        - coverage details and premiums
-        - Status and dates
-
-    Quality checks:
-        - Policy numbers are unique
-        - Premiums are positive
-        - Dates are valid
-        - Status is one of the valid values
+    Design intent:
+    - Standardize raw insurance policy data for downstream enrichment.
+    - Perform initial data quality checks (e.g., positive premiums, valid dates).
+    - Normalize text fields (UPPER, TRIM) to ensure consistent grouping and joining.
 */
 
 WITH raw_policies AS (
+    -- Source data from the raw ingestion layer
     SELECT * FROM {{ source('insurance', 'policies_raw') }}
 ),
 
 cleaned AS (
     SELECT
-        -- Primary key
+        -- Primary key normalization to ensure reliable joins
         TRIM(policy_id) AS policy_id,
         TRIM(policy_number) AS policy_number,
 
-        -- Policy type
+        -- Policy and product categorization
         UPPER(TRIM(policy_type)) AS policy_type,
         UPPER(TRIM(product_code)) AS product_code,
         TRIM(product_name) AS product_name,
 
-        -- Client (trimmed and normalised)
+        -- Client information normalization
         TRIM(client_id) AS client_id,
         TRIM(client_name) AS client_name,
+        -- INITCAP provides a readable format for reporting while preserving uniqueness
         INITCAP(TRIM(client_name)) AS client_name_normalised,
         UPPER(TRIM(client_country)) AS client_country,
 
-        -- Coverage
+        -- Coverage and financial metrics casting for mathematical operations
         UPPER(TRIM(coverage_type)) AS coverage_type,
         UPPER(TRIM(coverage_country)) AS coverage_country,
         CAST(sum_insured AS DECIMAL(18,2)) AS sum_insured,
         UPPER(TRIM(sum_insured_currency)) AS sum_insured_currency,
         CAST(excess_amount AS DECIMAL(18,2)) AS excess_amount,
 
-        -- Premium
+        -- Premium details: standardized for actuarial calculations
         CAST(premium_annual AS DECIMAL(18,2)) AS premium_annual,
         UPPER(TRIM(premium_currency)) AS premium_currency,
         UPPER(TRIM(premium_frequency)) AS premium_frequency,
         UPPER(TRIM(premium_payment_method)) AS premium_payment_method,
         UPPER(TRIM(premium_status)) AS premium_status,
 
-        -- Dates (cast to date type)
+        -- Date parsing with regex validation to avoid casting errors
         CASE
             WHEN inception_date ~ '^\d{4}-\d{2}-\d{2}$'
             THEN CAST(inception_date AS DATE)
@@ -83,25 +79,26 @@ cleaned AS (
             ELSE NULL
         END AS cancellation_date,
 
-        -- Status
+        -- Operational status fields
         UPPER(TRIM(policy_status)) AS policy_status,
         UPPER(TRIM(underwriting_status)) AS underwriting_status,
 
-        -- Beneficiary
+        -- Beneficiary details
         TRIM(beneficiary_name) AS beneficiary_name,
         UPPER(TRIM(beneficiary_type)) AS beneficiary_type,
 
-        -- Asset details
+        -- Insured asset attributes for risk location analysis
         TRIM(asset_description) AS asset_description,
         UPPER(TRIM(asset_location_country)) AS asset_location_country,
         TRIM(asset_location_city) AS asset_location_city,
         CAST(asset_value AS DECIMAL(18,2)) AS asset_value,
 
-        -- Metadata
+        -- Audit metadata for lineage tracking
         _ingested_at,
         _source_system
 
     FROM raw_policies
+    -- Basic filter to remove broken records at the entry point
     WHERE policy_id IS NOT NULL
       AND client_id IS NOT NULL
 ),
@@ -109,7 +106,7 @@ cleaned AS (
 validated AS (
     SELECT
         *,
-        -- Validation flags
+        -- Validation flags to facilitate data quality reporting
         CASE
             WHEN policy_type IN ('ASSET', 'CREDIT', 'LIABILITY', 'MARINE', 'AVIATION', 'ENGINEERING')
             THEN TRUE
@@ -128,6 +125,7 @@ validated AS (
             THEN TRUE
             ELSE FALSE
         END AS is_valid_status,
+        -- Temporal consistency check
         CASE
             WHEN expiry_date > inception_date THEN TRUE
             ELSE FALSE
@@ -140,6 +138,7 @@ validated AS (
     FROM cleaned
 )
 
+-- Final selection filters out records that fail critical business rules
 SELECT
     policy_id,
     policy_number,

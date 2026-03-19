@@ -1,8 +1,8 @@
 """
 @file expansion_detector.py
-@description Detects geographic client expansion by analyzing SIM activations across countries
+@description Detects geographic client expansion by analyzing SIM activations across different African markets.
 @author Thabo Kunene
-@created 2026-03-17
+@created 2026-03-19
 """
 
 """
@@ -18,10 +18,15 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
+# Type hinting for nested data structures and optional parameters
 from typing import Dict, List, Optional, Any
+# Dataclasses for structured signal output
 from dataclasses import dataclass
+# Datetime utilities for window-based analysis and timestamp generation
 from datetime import datetime, timedelta, timezone
+# Standard logging for operational observability and alerting
 import logging
+# Specialized dictionary for automatic initialization of missing keys
 from collections import defaultdict
 
 # BaseProcessor defines the minimal processing interface used across domains
@@ -36,14 +41,14 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExpansionSignal:
     """
-    Signal indicating client expansion.
+    Structured signal indicating a potential client expansion into a new territory.
 
     Attributes:
-        client_id: Client identifier
-        new_country: Newly entered country
-        sim_count: Number of new SIMs
-        confidence: Signal confidence (0-100)
-        detected_at: Detection timestamp
+        client_id: Unique identifier for the client entity.
+        new_country: ISO code of the newly entered country.
+        sim_count: Number of new SIM activations detected.
+        confidence: Normalized score (0-100) representing signal strength.
+        detected_at: Precise timestamp when the expansion was identified.
     """
     client_id: str
     new_country: str
@@ -54,14 +59,14 @@ class ExpansionSignal:
 
 class ExpansionDetector:
     """
-    Detects geographic expansion from SIM activations.
-
-    We identify when clients activate SIMs in new
-    countries, indicating business expansion.
+    Detects geographic expansion from SIM activation trends.
+    
+    This detector monitors when corporate clients activate a significant number
+    of SIM cards in countries where they previously had no footprint.
 
     Attributes:
-        min_sim_threshold: Minimum SIMs for detection
-        time_window_days: Time window for analysis
+        min_sim_threshold: Minimum number of SIMs required to trigger a signal.
+        time_window_days: The rolling window period for aggregating activations.
     """
 
     def __init__(
@@ -70,15 +75,15 @@ class ExpansionDetector:
         time_window_days: int = 30
     ) -> None:
         """
-        Initialize the expansion detector.
+        Initializes the expansion detector with configurable thresholds.
 
-        Args:
-            min_sim_threshold: Minimum SIM threshold
-            time_window_days: Analysis window
+        :param min_sim_threshold: Minimum SIM count for a valid signal.
+        :param time_window_days: Analysis window in days.
         """
         self.min_sim_threshold = min_sim_threshold
         self.time_window_days = time_window_days
 
+        # Internal state to track activations per client
         self.activations: Dict[str, List[Dict[str, Any]]] = (
             defaultdict(list)
         )
@@ -97,7 +102,13 @@ class ExpansionDetector:
         timestamp: Optional[datetime] = None
     ) -> None:
         """
-        Add a SIM activation event.
+        Records a new SIM activation event for a client.
+
+        :param client_id: Identifier of the client.
+        :param country: ISO code of the activation country.
+        :param sim_count: Number of SIMs activated.
+        :param timestamp: Event timestamp (defaults to current UTC time).
+        """
 
         Args:
             client_id: Client identifier

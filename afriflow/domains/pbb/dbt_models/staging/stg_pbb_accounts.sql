@@ -1,3 +1,11 @@
+-- =============================================================================
+-- @file stg_pbb_accounts.sql
+-- @description Staging model for PBB accounts, performing data cleaning,
+--     type casting, and basic validation on raw ingestion data.
+-- @author Thabo Kunene
+-- @created 2026-03-19
+-- =============================================================================
+
 {{
     config(
         materialized='view',
@@ -6,35 +14,21 @@
 }}
 
 /*
-    Staging model for PBB (Personal & Business Banking) accounts.
-
-    We perform initial cleaning, type casting, and validation
-    on raw PBB account data from core banking systems.
-
-    The PBB domain is critical for workforce capture signal:
-    we compare cell SIM counts against PBB payroll deposits
-    to identify employees banking with competitors.
-
-    Columns:
-        - Account identifiers (hashed for privacy)
-        - Account holder details
-        - Balance and turnover metrics
-        - Corporate linkage (employer)
-        - Channel usage
-
-    Quality checks:
-        - Account IDs are unique
-        - Balances are valid numbers
-        - Country codes are valid ISO 3166-1 alpha-2
+    Design intent:
+    - Standardize raw PBB account data for downstream enrichment and modeling.
+    - Perform initial data quality checks (e.g., valid countries, account types).
+    - Normalize text fields (UPPER, TRIM) to ensure consistent grouping and joining.
+    - Prepare data for workforce capture analysis (payroll linkage).
 */
 
 WITH raw_accounts AS (
+    -- Source data from the raw ingestion layer
     SELECT * FROM {{ source('pbb', 'accounts_raw') }}
 ),
 
 cleaned AS (
     SELECT
-        -- Ingestion metadata
+        -- Ingestion metadata for lineage and auditing
         TRIM(ingestion_id) AS ingestion_id,
         CAST(ingestion_timestamp AS TIMESTAMP) AS ingestion_timestamp,
         TRIM(kafka_topic) AS kafka_topic,
@@ -43,29 +37,29 @@ cleaned AS (
         TRIM(source_system) AS source_system,
         TRIM(schema_version) AS schema_version,
 
-        -- Account identity
+        -- Account identity: hashed where necessary for privacy compliance
         TRIM(account_id) AS account_id,
         TRIM(account_number_hash) AS account_number_hash,
         UPPER(TRIM(account_type)) AS account_type,
         TRIM(product_code) AS product_code,
         TRIM(product_name) AS product_name,
 
-        -- Account holder (anonymised for privacy/POPIA)
+        -- Account holder (anonymised for POPIA/GDPR compliance)
         TRIM(customer_id_hash) AS customer_id_hash,
         UPPER(TRIM(customer_segment)) AS customer_segment,
         UPPER(TRIM(customer_country)) AS customer_country,
 
-        -- Corporate linkage
+        -- Corporate linkage: crucial for payroll and workforce analytics
         TRIM(employer_client_id) AS employer_client_id,
         TRIM(employer_name) AS employer_name,
         COALESCE(is_payroll_account, FALSE) AS is_payroll_account,
 
-        -- Balances (non-negative for available, can be negative for current)
+        -- Balances: standardized for financial modeling
         CAST(current_balance AS DECIMAL(18,2)) AS current_balance,
         GREATEST(0, CAST(available_balance AS DECIMAL(18,2))) AS available_balance,
         UPPER(TRIM(account_currency)) AS account_currency,
 
-        -- Activity metrics
+        -- Activity metrics: used for behavioral profiling and dormancy detection
         CASE
             WHEN last_transaction_date ~ '^\d{4}-\d{2}-\d{2}$'
             THEN CAST(last_transaction_date AS DATE)
@@ -75,7 +69,7 @@ cleaned AS (
         CAST(debit_turnover_30d AS DECIMAL(18,2)) AS debit_turnover_30d,
         CAST(credit_turnover_30d AS DECIMAL(18,2)) AS credit_turnover_30d,
 
-        -- Status
+        -- Status and lifecycle dates
         UPPER(TRIM(account_status)) AS account_status,
         CASE
             WHEN opened_date ~ '^\d{4}-\d{2}-\d{2}$'
@@ -88,7 +82,7 @@ cleaned AS (
             ELSE NULL
         END AS closed_date,
 
-        -- Channel usage
+        -- Channel usage: indicators of digital adoption and customer engagement
         COALESCE(digital_active, FALSE) AS digital_active,
         COALESCE(card_active, FALSE) AS card_active,
         COALESCE(ussd_active, FALSE) AS ussd_active,
@@ -98,7 +92,7 @@ cleaned AS (
             ELSE NULL
         END AS branch_last_visit,
 
-        -- Partitioning
+        -- Partitioning for efficient query performance
         CASE
             WHEN ingestion_date ~ '^\d{4}-\d{2}-\d{2}$'
             THEN CAST(ingestion_date AS DATE)
@@ -113,7 +107,7 @@ cleaned AS (
 validated AS (
     SELECT
         *,
-        -- Validation flags
+        -- Validation flags based on business rules and geographical presence
         CASE
             WHEN customer_country IN ('ZA', 'NG', 'KE', 'GH', 'TZ', 'UG', 'ZM', 'MZ', 'CI', 'RW', 'AO', 'CM', 'ET', 'MW', 'SS')
             THEN TRUE
@@ -134,7 +128,7 @@ validated AS (
             THEN TRUE
             ELSE FALSE
         END AS is_valid_segment,
-        -- Derived flags
+        -- Derived flags for operational reporting
         CASE
             WHEN closed_date IS NOT NULL THEN TRUE
             ELSE FALSE
@@ -147,7 +141,7 @@ validated AS (
             WHEN current_balance < 0 THEN TRUE
             ELSE FALSE
         END AS is_overdrawn,
-        -- Channel adoption score
+        -- Combined channel adoption score for customer value segmentation
         (
             CASE WHEN digital_active THEN 1 ELSE 0 END +
             CASE WHEN card_active THEN 1 ELSE 0 END +
@@ -157,6 +151,7 @@ validated AS (
     FROM cleaned
 )
 
+-- Final selection filters out records that fail critical validation criteria
 SELECT
     ingestion_id,
     ingestion_timestamp,

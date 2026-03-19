@@ -1,4 +1,11 @@
 """
+@file kafka_producer.py
+@description Robust Kafka producer for the Insurance domain, supporting Avro serialization, DLQ routing, and real-time metrics collection.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Insurance Kafka Producer
 
 This module provides a robust Kafka producer for the Insurance domain,
@@ -15,25 +22,43 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
+# Standard library for environment variable access and file path manipulation
 import os
+# Standard library for JSON encoding/decoding of fallback payloads
 import json
+# Standard logging for operational observability and audit trails
 import logging
+# Time utilities for retry backoff and metrics intervals
 import time
+# Threading for safe access to shared state and background tasks
 import threading
+# Type hinting for defining strong collection and functional contracts
 from typing import Dict, Any, Optional, List, Callable, Union
+# Pathlib for modern filesystem interactions
 from pathlib import Path
+# Datetime for timestamping events and metadata
 from datetime import datetime
+# Dataclasses for structured, immutable-ish configuration containers
 from dataclasses import dataclass, field
+# Enumeration support for environment and status classifications
 from enum import Enum
+# Specialized collections for automatic key initialization and mapping
 from collections import defaultdict
+# Hashing for generating unique trace IDs and fingerprinting
 import hashlib
 
+# High-performance Kafka client for production-grade streaming
 from confluent_kafka import Producer, KafkaError
+# Client for interacting with the Confluent Schema Registry
 from confluent_kafka.schema_registry import SchemaRegistryClient
+# Avro-specific serializer for structured, schema-validated payloads
 from confluent_kafka.schema_registry.avro import AvroSerializer
+# Serialization context used to map record fields to schema fields
 from confluent_kafka.serialization import SerializationContext, MessageField
 
+# AfriFlow logging utility for consistent JSON formatting and correlation
 from afriflow.logging_config import get_logger, log_operation
+# Application configuration management and singleton access
 from afriflow.domains.shared.config import AppConfig, get_config
 
 
@@ -42,7 +67,10 @@ from afriflow.domains.shared.config import AppConfig, get_config
 # ============================================================================
 
 class Environment(Enum):
-    """Supported deployment environments."""
+    """
+    Supported deployment environments.
+    Used to set default reliability and performance profiles.
+    """
     DEV = "dev"
     STAGING = "staging"
     PROD = "prod"
@@ -51,27 +79,35 @@ class Environment(Enum):
 
 @dataclass
 class ProducerConfig:
-    """Kafka producer configuration container."""
+    """
+    Kafka producer configuration container.
+    Stores connection strings, reliability settings, and operational flags.
+    """
     bootstrap_servers: str = "localhost:9092"
     schema_registry_url: str = "http://localhost:8081"
     client_id: str = "afriflow-insurance-producer"
-    acks: Union[str, int] = "all"
-    retries: int = 5
+    acks: Union[str, int] = "all" # Level of acknowledgement required from Kafka
+    retries: int = 5 # Number of times to retry on transient failure
     retry_backoff_ms: int = 100
-    batch_size: int = 16384
-    linger_ms: int = 5
+    batch_size: int = 16384 # Maximum size of a single Kafka batch in bytes
+    linger_ms: int = 5 # Time to wait for more records before sending a batch
     compression_type: str = "snappy"
-    enable_idempotence: bool = True
-    dlq_topic: Optional[str] = "insurance.dlq"
+    enable_idempotence: bool = True # Ensures exactly-once delivery semantics
+    dlq_topic: Optional[str] = "insurance.dlq" # Topic for failed record routing
     metrics_enabled: bool = True
     metrics_interval_seconds: int = 60
     
     @classmethod
     def from_env(cls, env: Optional[str] = None) -> 'ProducerConfig':
-        """Load configuration from environment variables."""
+        """
+        Loads configuration from environment variables with sensible defaults.
+        
+        :param env: Explicit environment override. Defaults to APP_ENV.
+        :return: An initialized ProducerConfig instance.
+        """
         environment = env or os.getenv("APP_ENV", "dev")
         
-        # Environment-specific defaults
+        # Environment-specific defaults to balance performance and reliability.
         if environment == "prod":
             acks = "all"
             compression = "snappy"

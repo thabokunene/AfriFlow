@@ -1,16 +1,10 @@
 """
 @file match_verification_queue.py
-@description Human-in-the-Loop Match Verification Queue for the AfriFlow entity
-             resolution layer. Routes match candidates that fall below the
-             HIGH_CONFIDENCE threshold (0.92) to a structured review queue where
-             domain experts adjudicate. Reviewer decisions feed a feedback loop
-             that tracks per-reviewer accuracy and informs threshold calibration.
-             AUTO_ACCEPT at or above 0.92; AUTO_REJECT below REVIEW_THRESHOLD (0.70);
-             scores in [0.70, 0.92) enter the queue with HIGH/MEDIUM/LOW priority.
-             Queue is in-memory for the portfolio demo; production would persist to
-             a Delta table or relational store.
+@description Human-in-the-loop match verification queue for the AfriFlow
+    entity resolution layer, routing uncertain match candidates to domain
+    experts for adjudication and tracking reviewer accuracy.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 import uuid                        # generates collision-resistant candidate IDs

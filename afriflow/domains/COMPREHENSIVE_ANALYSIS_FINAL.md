@@ -1,3 +1,10 @@
+<!--
+@file COMPREHENSIVE_ANALYSIS_FINAL.md
+@description Final analysis report of the domains module and EKS integration, summarizing critical fixes and new features.
+@author Thabo Kunene
+@created 2026-03-19
+-->
+
 # Domains Folder Comprehensive Analysis & EKS Integration
 
 ## Executive Summary

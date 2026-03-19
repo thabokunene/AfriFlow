@@ -1,13 +1,10 @@
 """
 @file golden_id_generator.py
-@description Golden ID Generator for the AfriFlow entity resolution layer.
-             Generates deterministic, collision-resistant identifiers for resolved
-             client entities. IDs are stable across resolution runs regardless of
-             processing order. Priority order: registration number (government-issued,
-             most stable) → tax number → name + country (fallback). The ID is a
-             SHA-256 truncated to 12 hex characters prefixed with 'GLD-'.
+@description Golden ID generator for the AfriFlow entity resolution layer,
+    producing deterministic, collision-resistant identifiers for resolved
+    client entities using stable government-issued identifiers or name fallbacks.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 import hashlib                    # SHA-256 hashing for deterministic ID generation

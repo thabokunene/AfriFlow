@@ -1,3 +1,9 @@
+/*
+ * @file mart_cell_intelligence.sql
+ * @description dbt mart model for cell intelligence, combining SIM analytics with MoMo flows to generate corporate growth signals.
+ * @author Thabo Kunene
+ * @created 2026-03-19
+ */
 {{
     config(
         materialized='table',
@@ -22,11 +28,13 @@
         - Client health monitoring
 */
 
+-- Pulling data from the intermediate enriched layer.
 WITH enriched_cell AS (
     SELECT * FROM {{ ref('int_cell_enriched') }}
 ),
 
--- MoMo aggregation (would join with MoMo raw data in production)
+-- Aggregate Mobile Money (MoMo) transactions at the corporate level.
+-- This CTE captures salary disbursements and supplier payments which are key economic proxies.
 momo_agg AS (
     SELECT
         corporate_client_id,
@@ -46,7 +54,7 @@ momo_agg AS (
         DATE_TRUNC('month', CAST(transaction_date AS DATE))
 ),
 
--- Combined cell + MoMo
+-- Join enriched SIM data with aggregated MoMo data to create a holistic client view.
 combined AS (
     SELECT
         ec.corporate_client_id,
@@ -73,7 +81,7 @@ combined AS (
         COALESCE(ma.momo_salary_value, 0) AS momo_salary_value,
         COALESCE(ma.momo_supplier_count, 0) AS momo_supplier_count,
         COALESCE(ma.momo_supplier_value, 0) AS momo_supplier_value,
-        -- MoMo regularity score (simplified)
+        -- Generate a regularity score based on the frequency and type of MoMo usage.
         CASE
             WHEN COALESCE(ma.momo_salary_count, 0) > 0 THEN 0.9
             WHEN COALESCE(ma.momo_transaction_count, 0) > 100 THEN 0.7
@@ -87,14 +95,14 @@ combined AS (
         AND ec.usage_month = ma.data_month
 ),
 
--- Calculate expansion signals
+-- Flag specific business signals based on combined analytics.
 with_signals AS (
     SELECT
         *,
-        -- Expansion flags
+        -- Identification of expanding or contracting corporate entities.
         CASE WHEN COALESCE(sim_growth_pct, 0) > 10 THEN TRUE ELSE FALSE END AS is_expanding,
         CASE WHEN COALESCE(sim_growth_pct, 0) < -10 THEN TRUE ELSE FALSE END AS is_contracting,
-        -- Activity tracking
+        -- Record the last seen activity date for churn monitoring.
         CASE
             WHEN total_active_sims > 0 THEN CURRENT_DATE
             ELSE NULL

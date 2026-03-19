@@ -1,14 +1,10 @@
 """
-Lekgotla Regulatory Channel
-
-Specialized channel for compliance and regulatory intelligence posts.
-Posts in this channel are reviewed by compliance officers and
-surface regulatory changes that affect client strategies.
-
-DISCLAIMER: This project is not a sanctioned initiative
-of Standard Bank Group, MTN, or any affiliated entity.
-It is a demonstration of concept, domain knowledge,
-and data engineering skill by Thabo Kunene.
+@file regulatory_channel.py
+@description Regulatory channel for the Lekgotla module, providing a specialized
+    workflow for compliance intelligence where posts are reviewed by compliance
+    officers before surfacing regulatory changes to client strategies.
+@author Thabo Kunene
+@created 2026-03-19
 """
 
 from __future__ import annotations

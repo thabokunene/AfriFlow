@@ -1,9 +1,11 @@
 """
 @file interfaces.py
-@description Shared simulator and processor interfaces used across all AfriFlow domains
+@description Shared simulator and processor interfaces used across all AfriFlow domains to ensure consistent data handling.
 @author Thabo Kunene
-@created 2026-03-17
+@created 2026-03-19
 """
+
+# Enables postponed evaluation of type annotations for forward references
 from __future__ import annotations
 # ABC and abstractmethod define the base contracts for processors/simulators
 from abc import ABC, abstractmethod
@@ -24,6 +26,10 @@ logger = get_logger("domains.shared.interfaces")
 
 @runtime_checkable
 class BaseSimulator(Protocol):
+    """
+    Structural protocol for simulator components.
+    Ensures any class implementing these methods can be used as a simulator.
+    """
     # initialize allows simulators to load configuration and precompute lookup data
     def initialize(self, config: Optional[AppConfig] = None) -> None: ...
     # validate_input enforces domain-specific constraints before generating records
@@ -37,31 +43,57 @@ class BaseSimulator(Protocol):
 class SimulatorBase(ABC):
     """
     Abstract base for domain simulators providing deterministic synthetic data.
-    Notes:
+    
+    Design intent:
     - Subclasses should validate inputs to prevent generating invalid contract records.
     - stream() standardizes bulk generation without requiring each simulator to reimplement loops.
     """
     def __init__(self, config: Optional[AppConfig] = None) -> None:
+        """
+        Initializes the simulator with an optional configuration override.
+        
+        :param config: Custom AppConfig instance. Defaults to the global singleton.
+        """
         # Default to global config so simulators behave consistently across environments
         self.config = config or get_config()
         self.initialize(self.config)
 
     @abstractmethod
-    # initialize prepares any internal state (e.g., reference data, distributions)
     def initialize(self, config: Optional[AppConfig] = None) -> None:
+        """
+        Prepares internal state such as reference data, distributions, or random seeds.
+        
+        :param config: Configuration object used for initialization.
+        """
         ...
 
     @abstractmethod
-    # validate_input should raise when provided parameters would produce invalid records
     def validate_input(self, **kwargs: Any) -> None:
+        """
+        Validates input parameters before generation. Should raise an exception on failure.
+        
+        :param kwargs: Keyword arguments to be validated.
+        """
         ...
 
     @abstractmethod
-    # generate_one returns a single record for the domain's contract (or a domain object)
     def generate_one(self, **kwargs: Any) -> Dict[str, Any] | Any:
+        """
+        Generates a single synthetic record or domain object.
+        
+        :param kwargs: Generation parameters (e.g., specific country, date range).
+        :return: A dictionary or object representing the generated record.
+        """
         ...
 
     def stream(self, count: int = 1, **kwargs: Any) -> Iterator[Dict[str, Any] | Any]:
+        """
+        Yields a stream of generated records.
+        
+        :param count: Number of records to generate.
+        :param kwargs: Parameters passed to generate_one.
+        :return: An iterator of generated records.
+        """
         # Guard count to avoid negative ranges and unintended infinite generation patterns
         for _ in range(max(0, int(count))):
             yield self.generate_one(**kwargs)
@@ -70,32 +102,57 @@ class SimulatorBase(ABC):
 class BaseProcessor(ABC):
     """
     Abstract base for domain processors used in sync and async execution contexts.
+    
     Design intent:
     - configure() loads environment-aware safety controls (RBAC, limits).
     - validate() enforces contract and security requirements before processing.
     - process_sync() implements the actual domain transformation/enrichment logic.
     """
     def __init__(self, config: Optional[AppConfig] = None) -> None:
+        """
+        Initializes the processor with an optional configuration override.
+        
+        :param config: Custom AppConfig instance. Defaults to the global singleton.
+        """
         # Default to global config so processors inherit consistent environment settings
         self.config = config or get_config()
         self.configure(self.config)
 
     @abstractmethod
-    # configure sets internal limits/roles based on environment and optional runtime config
     def configure(self, config: Optional[AppConfig] = None) -> None:
+        """
+        Sets internal limits, roles, or endpoints based on the provided configuration.
+        
+        :param config: Configuration object used for setup.
+        """
         ...
 
     @abstractmethod
-    # validate checks record shape, required fields, and authorization constraints
     def validate(self, record: Any) -> None:
+        """
+        Checks record integrity, required fields, and authorization constraints.
+        
+        :param record: The input record to be validated.
+        """
         ...
 
     @abstractmethod
-    # process_sync runs the processor's synchronous transformation logic
     def process_sync(self, record: Any) -> Any:
+        """
+        Executes the primary synchronous transformation or enrichment logic.
+        
+        :param record: The input record to process.
+        :return: The processed/enriched result.
+        """
         ...
 
     async def process_async(self, record: Any) -> Any:
+        """
+        Async wrapper for the synchronous processing logic.
+        
+        :param record: The input record to process.
+        :return: The processed/enriched result.
+        """
         # Offload CPU-bound sync processing to a thread executor to keep async loops responsive
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.process_sync, record)

@@ -1,3 +1,10 @@
+<!--
+@file DOMAINS_FIXES_SUMMARY.md
+@description Summary of fixes applied to the domains module, including critical bugs and architectural improvements.
+@author Thabo Kunene
+@created 2026-03-19
+-->
+
 # Domains Folder Fixes Summary
 
 ## Executive Summary

@@ -1,4 +1,11 @@
 """
+@file sim_activation_generator.py
+@description Generator for synthetic corporate SIM activation events, simulating market entry and workforce sizing signals.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Corporate SIM Activation Batch Generator
 
 We generate realistic synthetic SIM activation events
@@ -37,15 +44,23 @@ or MTN Group project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
+# Random library for stochastic event generation based on activation profiles
 import random
+# UUID for generating unique batch and record identifiers
 import uuid
+# Dataclass for structured representation of SIM activation batches
 from dataclasses import dataclass
+# Datetime utilities for timestamping generated events
 from datetime import datetime, timedelta, timezone
+# Typing hints for defining strong functional and collection contracts
 from typing import Dict, Iterator, List, Optional, Tuple
 
+# Custom exception for configuration-related failures
 from afriflow.exceptions import ConfigurationError
+# AfriFlow logging utility for consistent log formatting
 from afriflow.logging_config import get_logger
 
+# Initialize module-level logger
 logger = get_logger(__name__)
 
 
@@ -53,6 +68,8 @@ logger = get_logger(__name__)
 # Activation type profiles
 # ---------------------------------------------------------------------------
 
+# Dictionary defining the characteristics of different SIM activation scenarios.
+# Used to bias the number of SIMs and departments involved in each batch.
 ACTIVATION_PROFILES: Dict[str, Dict] = {
     "new_enterprise": {
         "min_sims": 100,
@@ -81,7 +98,7 @@ ACTIVATION_PROFILES: Dict[str, Dict] = {
 }
 
 # Price plans available per activation type.
-# Higher-tier plans include roaming and higher data caps.
+# Higher-tier plans include roaming and higher data caps for enterprise clients.
 PRICE_PLANS: Dict[str, List[str]] = {
     "new_enterprise": ["corporate_premium", "corporate_standard", "corporate_data_heavy"],
     "sme_starter":    ["sme_basic", "sme_standard"],
@@ -90,7 +107,7 @@ PRICE_PLANS: Dict[str, List[str]] = {
 }
 
 # Major corporate operational hubs by country.
-# Used to generate realistic activation locations.
+# Used to generate realistic activation locations within African markets.
 COUNTRY_CITIES: Dict[str, List[str]] = {
     "ZA": ["Johannesburg", "Cape Town", "Durban", "Pretoria", "Port Elizabeth"],
     "NG": ["Lagos", "Abuja", "Port Harcourt", "Kano", "Ibadan"],

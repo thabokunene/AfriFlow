@@ -1,14 +1,10 @@
 """
 @file client_matcher.py
-@description Client Matcher and Entity Resolver for the AfriFlow entity resolution layer.
-             ClientMatcher performs fuzzy string matching of dirty client names against
-             a golden record store using the thefuzz library (token set ratio + WRatio).
-             EntityResolver runs a three-stage pipeline — deterministic clustering by
-             registration/tax number, heuristic merging by anchor tokens, and canonical
-             name selection — to produce ResolvedEntity objects from raw ClientEntity
-             records sourced across multiple domains.
+@description Client matching and entity resolution engine for the AfriFlow
+    integration layer, performing fuzzy string matching and multi-stage
+    deterministic/heuristic clustering to produce unified golden records.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 from __future__ import annotations  # enables forward references in type hints

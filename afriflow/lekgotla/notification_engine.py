@@ -1,13 +1,10 @@
 """
-Lekgotla Notification Engine
-
-Pushes relevant threads and Knowledge Cards to practitioners
-based on their portfolio, signals they receive, and past activity.
-
-DISCLAIMER: This project is not a sanctioned initiative
-of Standard Bank Group, MTN, or any affiliated entity.
-It is a demonstration of concept, domain knowledge,
-and data engineering skill by Thabo Kunene.
+@file notification_engine.py
+@description Notification engine for the Lekgotla module, delivering contextual
+    alerts to practitioners about relevant threads, Knowledge Cards, and replies
+    based on their portfolio and past activity.
+@author Thabo Kunene
+@created 2026-03-19
 """
 
 from __future__ import annotations

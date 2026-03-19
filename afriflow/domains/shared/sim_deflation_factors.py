@@ -1,4 +1,11 @@
 """
+@file sim_deflation_factors.py
+@description Registry of SIM-to-person deflation factors for African markets, used to estimate unique subscriber counts.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 SIM to Employee Deflation Factors.
 
 In Africa, a single person commonly uses 2 to 4 SIM
@@ -13,20 +20,17 @@ It is a demonstration of concept, domain knowledge,
 and skill by Thabo Kunene.
 """
 
+# Type hinting for nested dictionary structures
 from typing import Dict, Any
+# Standard logging for reporting unknown country codes during deflation
 import logging
 
+# Initialize module-level logger for deflation events
 logger = logging.getLogger(__name__)
 
-# Average SIMs per person by country and the
-# corresponding deflation factor to convert SIM
-# count to estimated unique person count.
-#
-# deflation_factor = 1 / avg_sims_per_person
-#
-# Sources: GSMA Intelligence (public reports),
-# national telecom regulator publications.
-
+# Average SIMs per person by country and the corresponding deflation factor.
+# The deflation_factor is calculated as 1 / avg_sims_per_person.
+# These metrics are critical for normalizing telecom usage data into human-centric insights.
 SIM_DEFLATION_FACTORS: Dict[str, Dict[str, Any]] = {
     "ZA": {
         "avg_sims_per_person": 1.3,
@@ -96,7 +100,7 @@ SIM_DEFLATION_FACTORS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# Default for countries not listed above.
+# Fallback configuration for countries not explicitly listed in the registry.
 DEFAULT_DEFLATION: Dict[str, Any] = {
     "avg_sims_per_person": 2.0,
     "deflation_factor": 0.50,

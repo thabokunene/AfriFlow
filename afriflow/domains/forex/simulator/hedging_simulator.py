@@ -1,4 +1,11 @@
 """
+@file hedging_simulator.py
+@description Generator for synthetic FX hedging instruments, simulating risk management strategies for African corporate clients.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Hedging Simulator
 
 We generate realistic synthetic FX hedging instruments
@@ -25,27 +32,37 @@ Group project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
+# UUID for generating unique instrument and record identifiers
 import uuid
+# Random library for stochastic event generation based on market profiles
 import random
+# Standard logging for operational telemetry and audit trails
 import logging
+# Dataclasses for structured representation of hedging instrument records
 from dataclasses import dataclass
+# Datetime utilities for timestamping and maturity calculations
 from datetime import datetime, timedelta, timezone
+# Typing hints for defining strong functional and collection contracts
 from typing import Dict, Iterator, List, Optional
 
+# AfriFlow logging utility for consistent log formatting and traceability
 from afriflow.logging_config import get_logger
+# Base simulator class providing standard initialization and streaming methods
 from afriflow.domains.shared.interfaces import SimulatorBase
+# Custom exception for configuration-related failures
 from afriflow.exceptions import ConfigurationError
 
+# Initialize logger for the hedging simulator namespace
 logger = get_logger("domains.forex.simulator.hedging_simulator")
 
 
-# Hedge instrument types
+# Permitted instrument types for FX hedging.
 HEDGE_TYPES = ["FORWARD", "OPTION_CALL", "OPTION_PUT", "SWAP", "COLLAR"]
 
-# Hedge status values
+# Permitted lifecycle statuses for a hedging instrument.
 HEDGE_STATUS = ["ACTIVE", "SETTLED", "TERMINATED", "EXPIRED"]
 
-# Common hedge tenors (in days)
+# Common tenor durations (in days) for standard corporate banking hedges.
 HEDGE_TENORS = [30, 60, 90, 180, 365]
 
 
@@ -53,21 +70,30 @@ HEDGE_TENORS = [30, 60, 90, 180, 365]
 class HedgeInstrument:
     """
     A single FX hedge instrument record.
+    Represents a contract designed to offset currency risk.
 
-    We publish these to the forex domain Kafka topic
-    (forex.hedges) for hedge accounting and
-    effectiveness tracking.
-
-    The hedge references an underlying exposure
-    (e.g., a forecast USD payment) and tracks
-    mark-to-market value over time.
+    Attributes:
+        hedge_id: Unique identifier for the hedge.
+        client_id: Identifier of the corporate client.
+        currency_pair: The currency pair being hedged (e.g., 'USD/ZAR').
+        hedge_type: The nature of the instrument (FORWARD, OPTION, etc.).
+        direction: BUY or SELL perspective of the client.
+        notional_base: The face value of the hedge in the base currency.
+        strike_rate: The pre-agreed exchange rate.
+        current_rate: The prevailing market rate at the time of record.
+        mark_to_market_usd: The current unrealized P&L of the hedge in USD.
+        hedge_effectiveness_pct: Calculated percentage of exposure offset.
+        inception_date: ISO timestamp when the hedge was initiated.
+        maturity_date: ISO timestamp when the hedge expires.
+        status: Current lifecycle state of the instrument.
+        underlying_exposure_id: Optional link to the specific exposure being offset.
     """
 
     hedge_id: str
     client_id: str
     currency_pair: str
     hedge_type: str
-    direction: str  # BUY or SELL
+    direction: str
     notional_base: float
     strike_rate: float
     current_rate: float
@@ -81,21 +107,27 @@ class HedgeInstrument:
 
 class HedgingSimulator(SimulatorBase):
     """
-    We generate realistic synthetic FX hedge instruments
-    for testing and demo purposes.
+    Generator for realistic synthetic FX hedge instruments.
+    Useful for testing hedge accounting systems and risk analytics.
 
     Usage:
-        gen = HedgingSimulator(seed=42)
+        gen = HedgingSimulator()
         hedge = gen.generate_forward("USD/ZAR", notional=1_000_000)
     """
 
-    # Approximate spot rates for simulation
+    # Approximate spot rates used as a baseline for strike and current rate generation.
     SPOT_RATES = {
         "USD/ZAR": 18.50, "USD/NGN": 1580.0, "USD/KES": 130.0,
         "USD/GHS": 15.5, "EUR/ZAR": 20.0, "GBP/ZAR": 23.5,
     }
 
     def __init__(self, seed: Optional[int] = None, config=None):
+        """
+        Initializes the hedging simulator.
+
+        :param seed: Optional random seed for deterministic generation.
+        :param config: Optional AppConfig override.
+        """
         if seed is not None:
             random.seed(seed)
         logger.info("HedgingSimulator initialized")

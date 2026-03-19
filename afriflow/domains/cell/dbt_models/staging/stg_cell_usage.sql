@@ -1,8 +1,8 @@
 /*
  * @file stg_cell_usage.sql
- * @description dbt staging model for cell usage data with cleaning and validation
+ * @description dbt staging model for cell usage data, performing initial cleaning, type casting, and validation of raw MTN metrics.
  * @author Thabo Kunene
- * @created 2026-03-17
+ * @created 2026-03-19
  */
 {{
     config(
@@ -33,13 +33,15 @@
         - Country codes are valid ISO 3166-1 alpha-2
 */
 
+-- Common Table Expression (CTE) to pull raw data from the MTN source.
 WITH raw_usage AS (
     SELECT * FROM {{ source('cell', 'usage_raw') }}
 ),
 
+-- CTE to clean and normalize raw fields for downstream analytics.
 cleaned AS (
     SELECT
-        -- Ingestion metadata
+        -- Ingestion metadata for lineage and auditing.
         TRIM(ingestion_id) AS ingestion_id,
         CAST(ingestion_timestamp AS TIMESTAMP) AS ingestion_timestamp,
         TRIM(kafka_topic) AS kafka_topic,
@@ -49,18 +51,18 @@ cleaned AS (
         TRIM(schema_version) AS schema_version,
         TRIM(integration_tier) AS integration_tier,
 
-        -- Corporate client linkage
+        -- Corporate client identifiers to link SIMs back to the bank's clients.
         TRIM(corporate_client_id) AS corporate_client_id,
         TRIM(corporate_account_ref) AS corporate_account_ref,
 
-        -- SIM identity (already hashed at source for POPIA compliance)
+        -- SIM identity (already hashed at source for POPIA/GDPR compliance).
         TRIM(sim_hash) AS sim_hash,
         TRIM(msisdn_hash) AS msisdn_hash,
         TRIM(imsi_hash) AS imsi_hash,
         UPPER(TRIM(sim_type)) AS sim_type,
         UPPER(TRIM(device_type)) AS device_type,
 
-        -- Usage period
+        -- Usage period normalization.
         CASE
             WHEN usage_date ~ '^\d{4}-\d{2}-\d{2}$'
             THEN CAST(usage_date AS DATE)
@@ -70,32 +72,32 @@ cleaned AS (
         TRIM(usage_city) AS usage_city,
         TRIM(usage_region) AS usage_region,
 
-        -- Voice metrics (non-negative)
+        -- Voice metrics: using GREATEST(0, ...) to ensure data quality.
         GREATEST(0, CAST(voice_minutes_in AS DECIMAL(10,2))) AS voice_minutes_in,
         GREATEST(0, CAST(voice_minutes_out AS DECIMAL(10,2))) AS voice_minutes_out,
         GREATEST(0, CAST(voice_calls_in AS INTEGER)) AS voice_calls_in,
         GREATEST(0, CAST(voice_calls_out AS INTEGER)) AS voice_calls_out,
 
-        -- Data metrics
+        -- Data consumption metrics in Megabytes.
         GREATEST(0, CAST(data_usage_mb AS DECIMAL(12,2))) AS data_usage_mb,
         GREATEST(0, CAST(data_sessions AS INTEGER)) AS data_sessions,
 
-        -- SMS metrics
+        -- SMS interaction counts.
         GREATEST(0, CAST(sms_sent AS INTEGER)) AS sms_sent,
         GREATEST(0, CAST(sms_received AS INTEGER)) AS sms_received,
 
-        -- USSD metrics (Africa-specific: banking via USSD)
+        -- USSD metrics (Critical for African banking accessibility analysis).
         GREATEST(0, CAST(ussd_sessions AS INTEGER)) AS ussd_sessions,
         GREATEST(0, CAST(ussd_banking_sessions AS INTEGER)) AS ussd_banking_sessions,
 
-        -- Revenue metrics
+        -- Revenue generated per SIM, used for business value attribution.
         GREATEST(0, CAST(revenue_voice AS DECIMAL(10,2))) AS revenue_voice,
         GREATEST(0, CAST(revenue_data AS DECIMAL(10,2))) AS revenue_data,
         GREATEST(0, CAST(revenue_sms AS DECIMAL(10,2))) AS revenue_sms,
         GREATEST(0, CAST(revenue_total AS DECIMAL(10,2))) AS revenue_total,
         UPPER(TRIM(revenue_currency)) AS revenue_currency,
 
-        -- Status
+        -- Operational status of the SIM.
         UPPER(TRIM(sim_status)) AS sim_status,
         CASE
             WHEN activation_date ~ '^\d{4}-\d{2}-\d{2}$'

@@ -1,8 +1,8 @@
 """
 @file kafka_producer.py
-@description Kafka producer for Cell domain ingestion with retries, batching, and Avro/JSON serialization
+@description Kafka producer for Cell domain ingestion with retries, batching, and Avro/JSON serialization.
 @author Thabo Kunene
-@created 2026-03-17
+@created 2026-03-19
 """
 
 """
@@ -20,27 +20,39 @@ Usage:
     producer.flush()
 """
 
-from __future__ import annotations  # forward references for type hints in class methods
+# Enables postponed evaluation of type annotations for forward references
+from __future__ import annotations
 
-import json  # JSON encoding for default payload serialization
-import os  # environment-driven runtime configuration for logging and bootstrap
-import threading  # thread-safe producer pool access and delivery callbacks
-import time  # exponential backoff calculation during retry
+# Standard library for JSON encoding/decoding
+import json
+# Standard library for interacting with the file system and environment variables
+import os
+# Threading utilities for potential thread-safe operations and callbacks
+import threading
+# Time utilities for sleep and timing benchmarks
+import time
+# Dataclass for structured configuration objects
 from dataclasses import dataclass
-from logging.handlers import RotatingFileHandler  # file rotation for ingestion logs
+# Specialized logging handler for rotating log files
+from logging.handlers import RotatingFileHandler
+# Typing hints for defining strong functional and collection contracts
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from afriflow.logging_config import get_logger  # structured JSON logging with correlation IDs
+# AfriFlow logging utility for consistent log formatting
+from afriflow.logging_config import get_logger
 
 try:
-    from confluent_kafka import Producer, KafkaException  # high-performance Kafka client for production use
+    # High-performance Kafka client for production use (confluent-kafka-python)
+    from confluent_kafka import Producer, KafkaException
 except Exception:  # pragma: no cover
     Producer = None
     KafkaException = Exception
 
 try:
-    from fastavro import writer as avro_writer, parse_schema  # efficient Avro serialization when schema provided
-    from io import BytesIO  # buffer for Avro writer output
+    # FastAvro for efficient Avro serialization when schemas are provided
+    from fastavro import writer as avro_writer, parse_schema
+    # BytesIO for buffering Avro-serialized data before transmission
+    from io import BytesIO
 except Exception:  # pragma: no cover
     avro_writer = None
     parse_schema = None
@@ -48,20 +60,37 @@ except Exception:  # pragma: no cover
 
 
 def _setup_rotating_logger(name: str) -> Any:
+    """
+    Configures a logger with a rotating file handler based on environment settings.
+    
+    :param name: The name of the logger.
+    :return: A configured logger instance.
+    """
     # Configure a rotating file logger to capture ingestion-specific operational logs
     logger = get_logger(name)
+    # File path for the Kafka producer logs
     log_file = os.environ.get("AF_CELL_KAFKA_LOG_FILE", "logs/cell_kafka_producer.log")
+    # Maximum size of a single log file before rotation (default 1MB)
     max_bytes = int(os.environ.get("AF_CELL_KAFKA_LOG_MAX_BYTES", "1048576"))
+    # Number of old log files to keep
     backup_count = int(os.environ.get("AF_CELL_KAFKA_LOG_BACKUP_COUNT", "5"))
+    
+    # Ensure the log directory exists
     os.makedirs(os.path.dirname(log_file) or ".", exist_ok=True)
+    
+    # Initialize and attach the rotating handler
     handler = RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
     logger.addHandler(handler)
+    # Set logging level (default INFO)
     logger.setLevel(os.environ.get("AF_CELL_KAFKA_LOG_LEVEL", "INFO"))
     return logger
 
 
 @dataclass
 class KafkaConfig:
+    """
+    Configuration container for Kafka producer parameters.
+    """
     # Minimal producer config with safe defaults and optional SASL
     bootstrap_servers: str
     acks: str = "all"
@@ -79,6 +108,11 @@ class KafkaConfig:
 
     @classmethod
     def from_env(cls) -> "KafkaConfig":
+        """
+        Loads Kafka configuration from environment variables with defaults.
+        
+        :return: An initialized KafkaConfig instance.
+        """
         # Build KafkaConfig from environment variables with defaults for local/dev
         return cls(
             bootstrap_servers=os.environ.get("AF_CELL_KAFKA_BOOTSTRAP", "localhost:9092"),
@@ -97,7 +131,11 @@ class KafkaConfig:
         )
 
     def to_producer_config(self) -> Dict[str, Any]:
-        # Translate dataclass fields to confluent_kafka Producer config dict
+        """
+        Translates dataclass fields to a confluent_kafka Producer config dictionary.
+        
+        :return: A dictionary suitable for initializing a confluent_kafka.Producer.
+        """
         cfg: Dict[str, Any] = {
             "bootstrap.servers": self.bootstrap_servers,
             "acks": self.acks,

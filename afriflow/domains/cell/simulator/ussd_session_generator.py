@@ -1,4 +1,11 @@
 """
+@file ussd_session_generator.py
+@description Generator for synthetic USSD session events, simulating financial inclusion and service accessibility signals.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 USSD Session Generator
 
 We generate realistic synthetic USSD session events
@@ -37,14 +44,22 @@ or MTN Group project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
+# Standard math library for calculating session durations and probabilities
 import math
+# Random library for stochastic event generation based on USSD code registries
 import random
+# UUID for generating unique session and record identifiers
 import uuid
+# Dataclass for structured representation of USSD session events
 from dataclasses import dataclass
+# Datetime utilities for timestamping generated events
 from datetime import datetime, timedelta, timezone
+# Typing hints for defining strong functional and collection contracts
 from typing import Any, Dict, Iterator, List, Optional
+# AfriFlow logging utility for consistent log formatting
 from afriflow.logging_config import get_logger
 
+# Initialize module-level logger
 logger = get_logger(__name__)
 
 
@@ -52,6 +67,8 @@ logger = get_logger(__name__)
 # USSD code registry per country
 # ---------------------------------------------------------------------------
 
+# Dictionary mapping ISO country codes to their respective USSD shortcodes and session types.
+# These codes reflect the actual infrastructure patterns observed in major African markets.
 USSD_CODES: Dict[str, Dict[str, str]] = {
     "ZA": {
         "*130#":       "airtime_check",

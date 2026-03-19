@@ -1,8 +1,8 @@
 """
 @file rate_anomaly_detector.py
-@description Detects FX rate anomalies using Z-score; RBAC and structured logging included
+@description Flink-based processor for detecting anomalous FX rate movements using statistical Z-score analysis.
 @author Thabo Kunene
-@created 2026-03-17
+@created 2026-03-19
 """
 
 """
@@ -16,47 +16,71 @@ We detect anomalous FX rate movements that may indicate:
 
 This processor implements security-hardened validation
 with RBAC, statistical anomaly detection, and structured logging.
+
+DISCLAIMER: This project is not a sanctioned initiative
+of Standard Bank Group, MTN, or any affiliated entity.
+It is a demonstration of concept, domain knowledge,
+and data engineering skill by Thabo Kunene.
 """
 
+# Standard logging for operational observability and market integrity monitoring
 import logging
+# Statistics library for calculating Z-scores based on historical price data
 import statistics
+# Type hinting for defining strong collection and functional contracts
 from typing import Any, Dict, List, Optional
 
+# BaseProcessor defines the core processing contract used across all AfriFlow domains
 from afriflow.domains.shared.interfaces import BaseProcessor
+# get_config provides environment-aware settings for security and operational constraints
 from afriflow.domains.shared.config import get_config
 
+# Initialize module-level logger for rate anomaly detection events
 logger = logging.getLogger(__name__)
 
 
 class Processor(BaseProcessor):
     """
-    Processor for detecting FX rate anomalies with:
-    - RBAC based on environment
-    - Input validation (dict, required fields, size guard)
-    - Statistical anomaly detection (Z-score based)
-    - Structured error logging
+    Rate anomaly detector implementation of the BaseProcessor.
+    Uses rolling Z-score analysis to identify price points that deviate significantly from the mean.
+    
+    Design intent:
+    - Enforce environment-aware RBAC (Role-Based Access Control).
+    - Limit payload size to maintain processing stability.
+    - Maintain historical rate windows for statistical baseline calculation.
+    - Provide structured error logging for troubleshooting.
     """
 
-    # Anomaly detection thresholds
+    # Default statistical thresholds for anomaly classification.
     DEFAULT_ZSCORE_THRESHOLD = 3.0
+    # Minimum number of data points required before a baseline is considered reliable.
     MIN_HISTORY_SIZE = 10
 
     def configure(self, config: Optional[Any] = None) -> None:
-        """Configure the processor with environment-specific settings."""
+        """
+        Sets internal configuration such as allowed roles, required fields, and record size limits.
+        Staging and production environments have more restrictive access controls.
+        
+        :param config: Optional configuration override.
+        """
         self.logger = logging.getLogger(__name__)
+        # Fallback to global config if no specific config is provided
         cfg = self.config if hasattr(self, "config") and self.config else get_config()
         env = getattr(cfg, "env", "dev")
 
+        # Define allowed roles based on the operational environment
         self._allowed_roles = (
             {"system", "service"}
             if env in {"staging", "prod"}
             else {"system", "service", "analyst"}
         )
+        # Prevent oversized records from causing memory issues in streaming jobs
         self._max_record_size = 100_000
+        # Set of mandatory fields required for valid rate anomaly analysis
         self._required_fields = {"currency_pair", "rate", "timestamp"}
         self._zscore_threshold = self.DEFAULT_ZSCORE_THRESHOLD
 
-        # Rate history for Z-score calculation
+        # Internal state to track historical rates per currency pair for Z-score calculation
         self._rate_history: Dict[str, List[float]] = {}
 
         self.logger.info(
@@ -66,15 +90,12 @@ class Processor(BaseProcessor):
 
     def validate(self, record: Any) -> None:
         """
-        Validate the input record.
-
-        Args:
-            record: Record to validate
-
-        Raises:
-            TypeError: If record is not a dict
-            PermissionError: If access_role not permitted
-            ValueError: If required fields missing or record too large
+        Validates the input record's type, security role, and mandatory fields.
+        
+        :param record: The record to be validated.
+        :raises TypeError: If the record is not a dictionary.
+        :raises PermissionError: If the access role is not authorized.
+        :raises ValueError: If required fields are missing or the record is too large.
         """
         if not isinstance(record, dict):
             raise TypeError("record must be a dict")
@@ -82,21 +103,23 @@ class Processor(BaseProcessor):
         role = record.get("access_role")
         src = record.get("source")
 
+        # Security check: verify the caller has the necessary permissions
         if role not in self._allowed_roles:
             raise PermissionError(
                 f"access_role '{role}' not permitted. "
                 f"Allowed: {self._allowed_roles}"
             )
 
+        # Lineage check: source must be clearly identified
         if not src or not isinstance(src, str):
             raise ValueError("source is required and must be a string")
 
-        # Check required fields
+        # Structural check: ensure all mandatory fields for anomaly detection are present
         missing = self._required_fields - set(record.keys())
         if missing:
             raise ValueError(f"Missing required fields: {missing}")
 
-        # Size guard
+        # Payload safety check
         if len(str(record)) > self._max_record_size:
             raise ValueError(
                 f"record size exceeds limit ({self._max_record_size} bytes)"

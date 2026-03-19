@@ -1,27 +1,10 @@
 """
 @file seasonal_calendar.py
-@description Agricultural and commodity seasonal calendar for African markets.
-
-             We use this module to adjust cross-domain signals for expected
-             seasonal patterns. Without seasonal adjustment, the flow drift
-             detector generates false attrition alerts every off-season — a
-             cocoa exporter's payments naturally collapse in March, which is
-             not evidence of churn.
-
-             Western ML models treat time as weekly or quarterly cycles.
-             African corporate cash flows are dominated by harvest seasons that
-             do not align with fiscal quarters and vary by crop and geography.
-             This calendar encodes that institutional knowledge explicitly.
-
-             Supported sectors: cocoa, maize, tea, sugar, tobacco, mining.
-             Supported countries: GH, CI, ZA, ZM, KE, MZ, CD (varies by sector).
-
-             DISCLAIMER: This project is not sanctioned by, affiliated with, or
-             endorsed by Standard Bank Group, MTN Group, or any affiliated entity.
-             It is a demonstration of concept, domain knowledge, and data
-             engineering skill by Thabo Kunene.
+@description Agricultural and commodity seasonal calendar for African markets,
+    providing adjustments for cross-domain signals to account for harvest-driven
+    cash flow volatility and avoid false attrition alerts.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 # Standard-library imports

@@ -1,13 +1,10 @@
 """
-Lekgotla Contribution Tracker
-
-Tracks user contributions to Lekgotla and calculates scores
-for gamification and leaderboard purposes.
-
-DISCLAIMER: This project is not a sanctioned initiative
-of Standard Bank Group, MTN, or any affiliated entity.
-It is a demonstration of concept, domain knowledge,
-and data engineering skill by Thabo Kunene.
+@file contribution_tracker.py
+@description Contribution tracking and gamification engine for the Lekgotla module,
+    calculating user scores, awarding badges, and maintaining leaderboards to
+    incentivize knowledge sharing.
+@author Thabo Kunene
+@created 2026-03-19
 """
 
 from __future__ import annotations

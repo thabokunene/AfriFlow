@@ -1,15 +1,10 @@
 """
 @file subsidiary_linker.py
-@description Corporate Subsidiary Linker and UBO Resolver for the AfriFlow entity
-             resolution layer. Traces ownership chains across cross-border corporate
-             structures common in African CIB portfolios — Mauritius holding companies,
-             South African OpCos, and Nigerian/Ghanaian branches nested under European
-             ultimate parents. Circular ownership (common in Southern African holding
-             structures) is detected and flagged rather than causing infinite loops.
-             Used for KYC/AML group-level exposure aggregation, RM briefings, and
-             CIB pricing across the full corporate group.
+@description Corporate subsidiary linker and UBO resolver for the AfriFlow
+    entity resolution layer, tracing ownership chains across cross-border
+    structures and detecting circular ownership loops.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 from dataclasses import dataclass, field  # structured entity, link, and result value objects

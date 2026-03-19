@@ -1,4 +1,11 @@
 """
+@file payment_generator.py
+@description Generator for synthetic CIB cross-border corporate payments, simulating complex international trade flows.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 CIB Payment Generator.
 
 We generate synthetic cross-border corporate payment
@@ -11,49 +18,57 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
+# UUID for generating unique transaction and record identifiers
 import uuid
+# Random library for stochastic event generation based on market profiles
 import random
+# Datetime utilities for timestamping generated events and simulating cycles
 from datetime import datetime, timedelta, timezone
+# Type hinting for defining strong collection and functional contracts
 from typing import Dict, List, Optional, Any
+# Standard logging for operational observability and security auditing
 import logging
 
+# Faker library for generating realistic synthetic company names and addresses
 from faker import Faker
 
+# Registry of African countries and their metadata for geographic attribution
 from afriflow.domains.shared.african_countries import AFRICAN_COUNTRIES
+# Mapping of country codes to their respective primary currencies
 from afriflow.domains.shared.currency_map import COUNTRY_TO_CURRENCY
 
+# Initialize module-level logger for the CIB payment simulator
 logger = logging.getLogger(__name__)
 
+# Global Faker instance for generating realistic data
 fake = Faker()
 
 
 class PaymentGenerator:
     """
-    Generates synthetic cross-border corporate payment
-    transactions for the CIB domain.
+    Generates synthetic cross-border corporate payment transactions for the CIB domain.
 
     Attributes:
-        clients: List of corporate client names
-        seed: Random seed for reproducibility
+        clients: Pre-generated list of major corporate client names in Africa.
+        seed: Random seed for ensuring reproducibility of generated datasets.
     """
 
-    # Maximum attempts to find different country
+    # Safety limit to prevent infinite loops during random country selection.
     MAX_COUNTRY_ATTEMPTS = 100
 
     def __init__(self, seed: Optional[int] = None) -> None:
         """
-        Initialize the payment generator.
+        Initializes the payment generator with an optional random seed.
 
-        Args:
-            seed: Optional random seed for reproducibility
+        :param seed: Optional integer for deterministic data generation.
         """
-        # Seed deterministically even when seed=0 (fixes falsy check bug)
+        # Seed both Faker and the random module for consistent output across runs.
         if seed is not None:
             Faker.seed(seed)
             random.seed(seed)
             logger.info(f"PaymentGenerator seeded with {seed}")
 
-        # Pre-generate recurring corporate entities to simulate repeat clients
+        # Registry of prominent African corporate entities to simulate realistic client portfolios.
         self.clients: List[str] = [
             "Dangote Cement",
             "MTN Group",
@@ -81,35 +96,34 @@ class PaymentGenerator:
 
     def _fuzzy_name(self, name: str) -> str:
         """
-        Introduce realistic data quality issues in entity names.
+        Introduces realistic data quality issues (typos, case variations) into entity names.
+        Useful for testing fuzzy matching and entity resolution algorithms.
 
-        Args:
-            name: Original company name
-
-        Returns:
-            Company name with realistic variations
+        :param name: The original, clean company name.
+        :return: A variation of the name with simulated data quality issues.
         """
+        # Choose a random variation type to apply.
         action = random.choice(["none", "typo", "suffix", "case"])
 
         if action == "none":
             return name
         elif action == "typo":
-            # Simple character swap with bounds checking
+            # Simulate a character swap typo.
             if len(name) > 3:
                 idx = random.randint(0, len(name) - 2)
-                # Ensure idx+1 is within bounds
-                if idx + 1 < len(name):
-                    return (
-                        name[:idx] + name[idx + 1] +
-                        name[idx] + name[idx + 2:]
-                    )
+                # Swap two adjacent characters.
+                chars = list(name)
+                chars[idx], chars[idx+1] = chars[idx+1], chars[idx]
+                return "".join(chars)
             return name
         elif action == "suffix":
-            suffix = random.choice(["Ltd", "Limited", "PLC", "Corp"])
-            return f"{name} {suffix}"
+            # Add or change the corporate legal suffix.
+            suffixes = ["Ltd", "Limited", "PLC", "Group", "Holdings"]
+            base_name = name.split(" ")[0]
+            return f"{base_name} {random.choice(suffixes)}"
         elif action == "case":
-            return name.upper()
-
+            # Simulate inconsistent casing from source systems.
+            return name.upper() if random.random() > 0.5 else name.lower()
         return name
 
     def _select_beneficiary_country(

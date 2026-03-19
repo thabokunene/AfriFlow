@@ -1,3 +1,11 @@
+-- =============================================================================
+-- @file mart_claims_intelligence.sql
+-- @description Final analytical mart for insurance claims, providing aggregated
+--     intelligence on claim frequency, severity, fraud risks, and settlement performance.
+-- @author Thabo Kunene
+-- @created 2026-03-19
+-- =============================================================================
+
 {{
     config(
         materialized='table',
@@ -6,30 +14,28 @@
 }}
 
 /*
-    Mart: Claims Intelligence
-
-    Aggregated claims-level analytics including:
-        - Claims frequency and severity
-        - Fraud detection flags
-        - Settlement time analysis
-        - Loss ratio by client and country
-
-    This mart powers claims dashboards, fraud detection,
-    and underwriting strategy optimization.
+    Design intent:
+    - Provide a unified view of insurance claims for management reporting.
+    - Calculate operational KPIs (e.g., settlement time, loss ratios).
+    - Flag potential fraud using heuristic-based risk scores.
+    - Classify claim severity to prioritize high-impact losses.
 */
 
 WITH raw_claims AS (
+    -- Source data from the raw ingestion layer
     SELECT * FROM {{ source('insurance', 'claims_raw') }}
 ),
 
--- Cleaned claims
+-- Cleaned claims with standardized types and parsed dates
 cleaned_claims AS (
     SELECT
+        -- Primary identifiers for linking across policy and client domains
         TRIM(claim_id) AS claim_id,
         TRIM(claim_number) AS claim_number,
         TRIM(policy_id) AS policy_id,
         TRIM(client_id) AS client_id,
         UPPER(TRIM(claim_type)) AS claim_type,
+        -- Date normalization with safety checks for malformed strings
         CASE
             WHEN loss_date ~ '^\d{4}-\d{2}-\d{2}$'
             THEN CAST(loss_date AS DATE)
@@ -42,6 +48,7 @@ cleaned_claims AS (
         END AS notification_date,
         UPPER(TRIM(loss_country)) AS loss_country,
         TRIM(loss_description) AS loss_description,
+        -- Financial metrics casting for actuarial calculations
         CAST(claim_amount AS DECIMAL(18,2)) AS claim_amount,
         UPPER(TRIM(claim_currency)) AS claim_currency,
         CAST(reserve_amount AS DECIMAL(18,2)) AS reserve_amount,
@@ -49,6 +56,7 @@ cleaned_claims AS (
         CAST(recovery_amount AS DECIMAL(18,2)) AS recovery_amount,
         UPPER(TRIM(claim_status)) AS claim_status,
         UPPER(TRIM(assessment_status)) AS assessment_status,
+        -- Initial fraud indicator from source systems
         COALESCE(fraud_flag, FALSE) AS fraud_flag,
         CASE
             WHEN settlement_date ~ '^\d{4}-\d{2}-\d{2}$'
@@ -60,6 +68,7 @@ cleaned_claims AS (
             THEN CAST(closed_date AS DATE)
             ELSE NULL
         END AS closed_date,
+        -- Audit metadata
         _ingested_at,
         _source_system
     FROM raw_claims
@@ -67,11 +76,11 @@ cleaned_claims AS (
       AND client_id IS NOT NULL
 ),
 
--- Claims with calculated metrics
+-- Claims with calculated operational and financial metrics
 with_metrics AS (
     SELECT
         *,
-        -- Days open
+        -- Lifecycle duration: tracks total exposure time
         CASE
             WHEN closed_date IS NOT NULL
             THEN closed_date - loss_date
@@ -79,25 +88,24 @@ with_metrics AS (
             THEN CURRENT_DATE - notification_date
             ELSE NULL
         END AS days_open,
-        -- Settlement time
+        -- Operational efficiency: tracks time from notification to payout
         CASE
             WHEN settlement_date IS NOT NULL AND notification_date IS NOT NULL
             THEN settlement_date - notification_date
             ELSE NULL
         END AS settlement_time_days,
-        -- Paid ratio
+        -- Financial recovery analysis
         CASE
             WHEN claim_amount > 0
             THEN ROUND(paid_amount::NUMERIC / claim_amount::NUMERIC * 100, 2)
             ELSE 0
         END AS paid_ratio_pct,
-        -- Recovery ratio
         CASE
             WHEN paid_amount > 0
             THEN ROUND(recovery_amount::NUMERIC / paid_amount::NUMERIC * 100, 2)
             ELSE 0
         END AS recovery_ratio_pct,
-        -- Severity classification
+        -- Severity classification for portfolio risk distribution reporting
         CASE
             WHEN claim_amount >= 1000000 THEN 'catastrophic'
             WHEN claim_amount >= 500000 THEN 'severe'
@@ -108,7 +116,7 @@ with_metrics AS (
     FROM cleaned_claims
 ),
 
--- Client claims summary
+-- Client-level claims aggregation for profiling and underwriting review
 client_claims AS (
     SELECT
         client_id,
@@ -123,7 +131,7 @@ client_claims AS (
     GROUP BY client_id
 ),
 
--- Enriched claims
+-- Enriched claims with client-level context and internal risk scoring
 enriched AS (
     SELECT
         wm.claim_id,
@@ -152,7 +160,7 @@ enriched AS (
         cc.total_claim_amount AS client_total_claim_amount,
         cc.fraud_claims_count AS client_fraud_claims,
         cc.avg_days_open AS client_avg_days_open,
-        -- Fraud risk score
+        -- Internal heuristic-based fraud risk score for prioritization
         CASE
             WHEN wm.fraud_flag THEN 50
             WHEN wm.claim_amount > 500000 AND wm.days_open > 90 THEN 25
@@ -164,6 +172,7 @@ enriched AS (
     WHERE wm.claim_status IN ('OPEN', 'PENDING', 'CLOSED', 'REJECTED')
 )
 
+-- Final output selection for the presentation layer
 SELECT
     claim_id,
     claim_number,

@@ -1,21 +1,13 @@
 """
-PBB (Personal & Business Banking) Kafka Producer
-
-This module provides a robust Kafka producer for the PBB domain,
-supporting Avro serialization, Schema Registry integration,
-automatic retries, and Dead Letter Queue (DLQ) support.
-
-We handle two primary event types:
-1. PBB Accounts (pbb.accounts)
-2. PBB Payroll (pbb.payroll)
-
-DISCLAIMER: This project is not a sanctioned initiative
-of Standard Bank Group, MTN, or any affiliated entity.
-It is a demonstration of concept, domain knowledge,
-and data engineering skill by Thabo Kunene.
+@file kafka_producer.py
+@description High-performance Kafka producer for the PBB domain, supporting Avro serialization,
+    Schema Registry integration, and resilient delivery patterns for retail and payroll data.
+@author Thabo Kunene
+@created 2026-03-19
 """
 
 import os
+# Standard libraries for data serialization, logging, and concurrency
 import json
 import logging
 import time
@@ -28,11 +20,13 @@ from enum import Enum
 from collections import defaultdict
 import hashlib
 
+# Confluent Kafka libraries for robust messaging and schema management
 from confluent_kafka import Producer, KafkaError
 from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.avro import AvroSerializer
 from confluent_kafka.serialization import SerializationContext, MessageField
 
+# Shared utilities for consistent observability and configuration
 from afriflow.logging_config import get_logger, log_operation
 from afriflow.domains.shared.config import AppConfig, get_config
 
@@ -222,16 +216,19 @@ class CircuitBreaker:
             return self._state
     
     def can_execute(self) -> bool:
-        """Check if request can proceed."""
+        """Check if request can proceed based on circuit state."""
         state = self.state
         if state == "CLOSED":
+            # Normal operation: allow all requests
             return True
         elif state == "HALF_OPEN":
+            # Testing recovery: allow limited requests
             with self._lock:
                 if self._half_open_calls < self.half_open_max_calls:
                     self._half_open_calls += 1
                     return True
             return False
+        # OPEN: reject all requests to allow downstream system to recover
         return False
     
     def record_success(self) -> None:

@@ -1,32 +1,10 @@
 """
-Authentication Middleware
-
-Validates Bearer JWT tokens and populates the auth context
-with the requester's identity, role, and country for
-downstream POPIA field masking and access control.
-
-JWT payload structure:
-    {
-        "sub": "RM-00142",                 # User ID
-        "role": "RM",                      # RM / Compliance / ExCo / Service
-        "country": "ZA",                   # Requester's home country
-        "permissions": ["read:clients",    # Fine-grained permissions
-                         "read:signals"],
-        "exp": 1735689600,                 # Expiry timestamp
-        "iss": "afriflow-auth"             # Issuer
-    }
-
-POPIA / GDPR implication:
-  - "country" in the JWT determines which records the user can see.
-  - Cross-border access requires explicit "cross_border:read" permission.
-  - Service accounts (for DAGs, batch jobs) use a separate issuer.
-
-This is a stub implementation — in production, JWT signature
-verification uses the HS256 key from the secrets manager.
-For portfolio purposes we verify structure only.
-
-Disclaimer: Portfolio project by Thabo Kunene. Not a
-Standard Bank Group product. All data is simulated.
+@file auth_middleware.py
+@description Authentication middleware for the AfriFlow API, validating Bearer
+    JWT tokens and populating an auth context with the requester's identity,
+    role, and country for downstream POPIA field masking and access control.
+@author Thabo Kunene
+@created 2026-03-19
 """
 
 from __future__ import annotations

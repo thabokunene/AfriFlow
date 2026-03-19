@@ -1,8 +1,8 @@
 """
 @file flow_drift_detector.py
-@description Detects drift in payment flows for CIB corridors using statistical baselines
+@description Flink-based detector for identifying statistical drift in CIB payment flows, providing early warnings for client behavior shifts.
 @author Thabo Kunene
-@created 2026-03-17
+@created 2026-03-19
 """
 
 """
@@ -18,27 +18,33 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
+# Type hinting for defining strong collection and functional contracts
 from typing import Dict, List, Optional, Any
+# Dataclasses for structured representation of drift alerts
 from dataclasses import dataclass
+# Datetime utilities for timestamping detected anomalies
 from datetime import datetime, timezone
-import logging  # Operational logging for initialization, anomalies, and alerts
+# Standard logging for operational observability and alerting context
+import logging
+# Statistics library for calculating mean and variance of payment flows
 import statistics
 
-logger = logging.getLogger(__name__)  # Module-level logger
+# Initialize module-level logger for drift detection events
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class FlowDriftAlert:
     """
-    Alert for detected flow drift.
+    Structured alert triggered when significant payment flow drift is detected.
 
     Attributes:
-        client_id: Client identifier
-        corridor: Payment corridor
-        drift_percentage: Percentage change
-        direction: Direction of drift (increase/decrease)
-        severity: Alert severity
-        detected_at: Detection timestamp
+        client_id: Unique identifier for the corporate client.
+        corridor: The payment corridor being monitored (e.g., 'ZA-NG').
+        drift_percentage: The calculated percentage change from the baseline.
+        direction: Indicates whether the flow has 'increased' or 'decreased'.
+        severity: The priority level of the alert ('critical', 'high', 'medium').
+        detected_at: The precise timestamp when the drift was identified.
     """
     client_id: str
     corridor: str
@@ -50,14 +56,14 @@ class FlowDriftAlert:
 
 class FlowDriftDetector:
     """
-    Detects drift in payment flow patterns.
-
-    We use statistical methods to identify significant
-    deviations from historical patterns.
+    Statistical engine for detecting deviations in CIB payment flows.
+    
+    This detector maintains a rolling window of historical values to calculate
+    a baseline and identify outliers that exceed a configurable threshold.
 
     Attributes:
-        threshold_percentage: Drift threshold for alerts
-        window_size: Number of periods for comparison
+        threshold_percentage: The minimum drift percentage required to trigger an alert.
+        window_size: The number of historical observations to maintain for the baseline.
     """
 
     def __init__(
@@ -66,14 +72,14 @@ class FlowDriftDetector:
         window_size: int = 30
     ) -> None:
         """
-        Initialize the drift detector.
+        Initializes the drift detector with configurable thresholds and window sizes.
 
-        Args:
-            threshold_percentage: Drift threshold
-            window_size: Comparison window size
+        :param threshold_percentage: Minimum drift for an alert. Defaults to 20.0%.
+        :param window_size: Number of historical data points to keep. Defaults to 30.
         """
         self.threshold_percentage = threshold_percentage
         self.window_size = window_size
+        # Dictionary mapping a unique key (client_id:corridor) to a list of historical values
         self.historical_data: Dict[str, List[float]] = {}
 
         logger.info(
@@ -90,13 +96,12 @@ class FlowDriftDetector:
         timestamp: Optional[datetime] = None
     ) -> None:
         """
-        Add a payment flow observation.
+        Records a new payment flow observation for a client and corridor.
 
-        Args:
-            client_id: Client identifier
-            corridor: Payment corridor
-            value: Payment value
-            timestamp: Observation timestamp
+        :param client_id: Identifier of the client.
+        :param corridor: The payment corridor.
+        :param value: The value of the payment flow.
+        :param timestamp: The observation timestamp (optional).
         """
         key = f"{client_id}:{corridor}"
 

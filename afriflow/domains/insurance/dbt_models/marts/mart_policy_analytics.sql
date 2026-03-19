@@ -1,3 +1,11 @@
+-- =============================================================================
+-- @file mart_policy_analytics.sql
+-- @description Final analytical mart for insurance policies, integrating
+--     claims history and predictive metrics for renewal and cross-sell analysis.
+-- @author Thabo Kunene
+-- @created 2026-03-19
+-- =============================================================================
+
 {{
     config(
         materialized='table',
@@ -6,28 +14,25 @@
 }}
 
 /*
-    Mart: Policy Analytics
-
-    Aggregated policy-level analytics including:
-        - Premium and coverage metrics
-        - Lapsing policy identification
-        - Coverage gap analysis
-        - Claims history linkage
-
-    This mart powers insurance dashboards and
-    cross-sell opportunity identification.
+    Design intent:
+    - Provide a consolidated view of policy performance and profitability.
+    - Link claims data to policies to calculate loss ratios.
+    - Model renewal probabilities to prioritize retention efforts.
+    - Identify cross-sell opportunities based on coverage gaps and policy types.
 */
 
 WITH enriched_policies AS (
+    -- Enriched policy records with client and risk metadata
     SELECT * FROM {{ ref('int_insurance_enriched') }}
 ),
 
--- Claims aggregation per policy
+-- Claims aggregation per policy to assess individual risk and performance
 claims_agg AS (
     SELECT
         policy_id,
         COUNT(*) AS total_claims_count,
         SUM(claim_amount_zar) AS total_claims_value_zar,
+        -- Operational visibility: separate open claims for reserve analysis
         SUM(CASE WHEN claim_status != 'CLOSED' THEN 1 ELSE 0 END) AS open_claims_count,
         SUM(CASE WHEN claim_status != 'CLOSED' THEN claim_amount_zar ELSE 0 END) AS open_claims_value_zar,
         MAX(claim_date) AS last_claim_date
@@ -35,7 +40,7 @@ claims_agg AS (
     GROUP BY policy_id
 ),
 
--- Policy analytics
+-- Policy analytics integrating performance and predictive metrics
 policy_analytics AS (
     SELECT
         ep.policy_id,
@@ -54,13 +59,13 @@ policy_analytics AS (
         ep.coverage_gap,
         ep.coverage_gap_amount_zar,
 
-        -- Claims metrics
+        -- Claims metrics joined from aggregation
         COALESCE(ca.total_claims_count, 0) AS total_claims_count,
         COALESCE(ca.total_claims_value_zar, 0) AS total_claims_value_zar,
         COALESCE(ca.open_claims_count, 0) AS open_claims_count,
         COALESCE(ca.open_claims_value_zar, 0) AS open_claims_value_zar,
 
-        -- Loss ratio
+        -- Loss ratio: primary KPI for underwriting profitability
         CASE
             WHEN ep.premium_annual_zar > 0
             THEN ROUND(
@@ -70,7 +75,7 @@ policy_analytics AS (
             ELSE 0
         END AS loss_ratio_pct,
 
-        -- Renewal probability (simplified)
+        -- Renewal probability: heuristic-based prediction for retention strategy
         CASE
             WHEN ep.days_to_expiry > 90 THEN 0.85
             WHEN ep.days_to_expiry > 30 THEN 0.70
@@ -78,7 +83,7 @@ policy_analytics AS (
             ELSE 0.20
         END AS renewal_probability,
 
-        -- Cross-sell flags
+        -- Cross-sell flags for automated lead generation
         CASE
             WHEN ep.policy_type = 'ASSET' AND NOT ep.coverage_gap THEN TRUE
             ELSE FALSE
@@ -93,6 +98,7 @@ policy_analytics AS (
     WHERE ep.policy_status IN ('ACTIVE', 'PENDING', 'RENEWED')
 )
 
+-- Final presentation layer with unique golden IDs for downstream systems
 SELECT
     'GOLD-' || policy_id AS golden_id,
     policy_id,

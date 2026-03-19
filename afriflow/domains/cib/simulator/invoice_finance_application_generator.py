@@ -1,4 +1,11 @@
 """
+@file invoice_finance_application_generator.py
+@description Generator for synthetic CIB invoice finance applications, supporting trade finance and supply chain simulations.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Invoice Finance Application Generator
 
 We generate realistic synthetic invoice finance applications
@@ -9,16 +16,25 @@ project. All data is simulated.
 Built by Thabo Kunene for portfolio purposes only.
 """
 
+# Enables postponed evaluation of type annotations for forward references
 from __future__ import annotations
+# Random library for stochastic event generation
 import random
+# Standard logging for operational observability and audit trails
 import logging
+# Dataclass for structured representation of invoice finance applications
 from dataclasses import dataclass
+# Datetime utilities for timestamping generated applications
 from datetime import datetime, timezone
+# Typing hints for defining strong functional and collection contracts
 from typing import Iterator, List, Optional
 
+# AfriFlow logging utility for consistent log formatting and traceability
 from afriflow.logging_config import get_logger
+# Base simulator class providing standard initialization and streaming methods
 from afriflow.domains.shared.interfaces import SimulatorBase
 
+# Initialize logger for the invoice finance application generator namespace
 logger = get_logger("domains.cib.simulator.invoice_finance_application_generator")
 
 
@@ -26,9 +42,15 @@ logger = get_logger("domains.cib.simulator.invoice_finance_application_generator
 class InvoiceFinanceApplication:
     """
     A single invoice finance application record.
+    Represents a corporate request for short-term liquidity backed by an outstanding invoice.
 
-    We publish these to the CIB domain Kafka topic
-    (cib.invoice_finance.applications) for processing.
+    Attributes:
+        application_id: Unique identifier for the finance request.
+        client_id: Identifier of the corporate client making the request.
+        invoice_amount: The face value of the invoice to be financed.
+        currency: ISO currency code of the invoice.
+        timestamp: The precise timestamp when the application was submitted.
+        tenor_days: The requested duration of the financing in days.
     """
 
     application_id: str
@@ -41,36 +63,44 @@ class InvoiceFinanceApplication:
 
 class InvoiceFinanceApplicationGenerator(SimulatorBase):
     """
-    We generate realistic synthetic invoice finance applications
-    for testing and demo purposes.
+    Generator for realistic synthetic invoice finance applications.
+    Useful for testing credit models, supply chain finance pipelines, and dashboards.
 
     Usage:
-        gen = InvoiceFinanceApplicationGenerator(seed=42)
+        gen = InvoiceFinanceApplicationGenerator()
         app = gen.generate_one(currency="USD")
     """
 
     def initialize(self, config=None) -> None:
-        """Initialize the generator with currencies."""
+        """
+        Initializes the generator with a list of supported currencies for trade finance.
+        
+        :param config: Optional configuration object.
+        """
+        # Supported currencies for CIB trade and invoice finance products.
         self._curr = ["USD", "ZAR", "NGN", "KES", "GHS", "EUR", "GBP"]
         logger.info("InvoiceFinanceApplicationGenerator initialized")
 
     def validate_input(self, **kwargs) -> None:
         """
-        Validate input parameters.
+        Validates input parameters before application generation.
 
-        Raises:
-            ValueError: If currency is invalid or amount is malformed
+        :param kwargs: Keyword arguments to validate.
+        :raises ValueError: If the currency format is invalid or metrics are out of range.
         """
+        # Validate currency code format (must be 3-letter ISO code).
         currency = kwargs.get("currency")
         if currency is not None:
             if not isinstance(currency, str) or len(currency) != 3:
                 raise ValueError(f"Invalid currency format: {currency}")
 
+        # Guard against invalid or zero-value invoice amounts.
         amount = kwargs.get("invoice_amount")
         if amount is not None:
             if not isinstance(amount, (int, float)) or amount <= 0:
                 raise ValueError("invoice_amount must be a positive number")
 
+        # Ensure the tenor is within standard corporate banking limits.
         tenor = kwargs.get("tenor_days")
         if tenor is not None:
             if not isinstance(tenor, int) or tenor < 1 or tenor > 365:
@@ -78,21 +108,17 @@ class InvoiceFinanceApplicationGenerator(SimulatorBase):
 
     def generate_one(self, **kwargs) -> InvoiceFinanceApplication:
         """
-        Generate a single invoice finance application.
+        Generates a single synthetic invoice finance application.
 
-        Args:
-            **kwargs: Optional overrides for currency, invoice_amount, tenor_days
-
-        Returns:
-            InvoiceFinanceApplication instance
-
-        Raises:
-            ValueError: If input validation fails
-            RuntimeError: If generation fails
+        :param kwargs: Optional overrides for currency, invoice_amount, and tenor_days.
+        :return: An InvoiceFinanceApplication instance.
+        :raises ValueError: If input validation fails.
+        :raises RuntimeError: If generation fails due to unexpected errors.
         """
         try:
             self.validate_input(**kwargs)
 
+            # Use provided values or generate random ones within realistic ranges.
             currency = kwargs.get("currency") or random.choice(self._curr)
             amount = kwargs.get("invoice_amount") or round(
                 random.uniform(5000, 5_000_000), 2

@@ -1,4 +1,11 @@
 """
+@file seasonal_calendars.py
+@description Registry of agricultural and commodity seasonal patterns across African markets to adjust anomaly detection.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Agricultural and Commodity Seasonal Calendars.
 
 We maintain seasonal calendars for major African
@@ -11,13 +18,27 @@ built it as a demonstration of concept, domain
 knowledge, and skill.
 """
 
+# Dataclasses for defining structured seasonal pattern metadata
 from dataclasses import dataclass
+# Type hinting for collections and optional values
 from typing import List, Optional
 
 
 @dataclass
 class SeasonalPattern:
-    """A seasonal pattern for a commodity in a country."""
+    """
+    Represents a specific seasonal pattern for a commodity within a country.
+    Used to normalize data and adjust expectations for trade flows.
+
+    Attributes:
+        commodity: Name of the agricultural or resource commodity (e.g., 'maize').
+        country_code: ISO country code where the pattern applies.
+        peak_months: List of months (1-12) with highest expected activity.
+        trough_months: List of months (1-12) with lowest expected activity.
+        flow_type: The nature of the movement ('export', 'import', 'domestic').
+        expected_peak_multiplier: Scale factor for activity during peak months.
+        expected_trough_multiplier: Scale factor for activity during trough months.
+    """
 
     commodity: str
     country_code: str
@@ -28,7 +49,10 @@ class SeasonalPattern:
     expected_trough_multiplier: float
 
 
+# Global registry of seasonal patterns for major African commodities.
+# This list informs the corridor and data shadow logic of expected cyclicality.
 SEASONAL_PATTERNS = [
+    # South African Maize: Harvest peaks in Q2
     SeasonalPattern(
         commodity="maize",
         country_code="ZA",
@@ -38,6 +62,7 @@ SEASONAL_PATTERNS = [
         expected_peak_multiplier=2.5,
         expected_trough_multiplier=0.3,
     ),
+    # Zambian Maize: Similar harvest cycle to South Africa
     SeasonalPattern(
         commodity="maize",
         country_code="ZM",
@@ -47,6 +72,7 @@ SEASONAL_PATTERNS = [
         expected_peak_multiplier=2.2,
         expected_trough_multiplier=0.4,
     ),
+    # Ghanaian Cocoa: Main crop harvest in Q4
     SeasonalPattern(
         commodity="cocoa",
         country_code="GH",
@@ -56,6 +82,7 @@ SEASONAL_PATTERNS = [
         expected_peak_multiplier=3.0,
         expected_trough_multiplier=0.2,
     ),
+    # Ivorian Cocoa: World's largest producer, follows similar Q4 peak
     SeasonalPattern(
         commodity="cocoa",
         country_code="CI",
@@ -65,6 +92,7 @@ SEASONAL_PATTERNS = [
         expected_peak_multiplier=3.2,
         expected_trough_multiplier=0.2,
     ),
+    # Kenyan Tea: High production in Q1 following rains
     SeasonalPattern(
         commodity="tea",
         country_code="KE",
@@ -74,6 +102,7 @@ SEASONAL_PATTERNS = [
         expected_peak_multiplier=2.0,
         expected_trough_multiplier=0.5,
     ),
+    # Mozambican Sugar: Extended harvest season through second half of year
     SeasonalPattern(
         commodity="sugar",
         country_code="MZ",
@@ -83,6 +112,7 @@ SEASONAL_PATTERNS = [
         expected_peak_multiplier=1.8,
         expected_trough_multiplier=0.4,
     ),
+    # Zambian Tobacco: Curing and auction season in Q2
     SeasonalPattern(
         commodity="tobacco",
         country_code="ZM",
@@ -92,6 +122,7 @@ SEASONAL_PATTERNS = [
         expected_peak_multiplier=2.5,
         expected_trough_multiplier=0.3,
     ),
+    # Kenyan Coffee: Main harvest period peaking late in the year
     SeasonalPattern(
         commodity="coffee",
         country_code="KE",

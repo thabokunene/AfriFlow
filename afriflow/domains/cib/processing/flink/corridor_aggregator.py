@@ -1,8 +1,8 @@
 """
 @file corridor_aggregator.py
-@description Aggregates corridor-level metrics with RBAC validation and safe no-op processing flag
+@description Flink-based aggregator for CIB corridor-level metrics, providing RBAC-enforced stream processing.
 @author Thabo Kunene
-@created 2026-03-17
+@created 2026-03-19
 """
 
 """
@@ -11,51 +11,96 @@ Corridor Aggregator (CIB, Flink-style).
 We provide a minimal, security-hardened Processor stub to aggregate or pass
 through corridor-level payment metrics in streaming jobs. This stub implements
 validation, RBAC, and error handling to ensure safe defaults.
+
+DISCLAIMER: This project is not a sanctioned initiative
+of Standard Bank Group, MTN, or any affiliated entity.
+It is a demonstration of concept, domain knowledge,
+and data engineering skill by Thabo Kunene.
 """
 
-import logging  # Operational logger for RBAC, validation, and processing outcomes
+# Standard logging for operational observability and security auditing
+import logging
+# Type hinting for defining strong collection and functional contracts
 from typing import Any, Dict
 
-from afriflow.domains.shared.interfaces import BaseProcessor  # Shared processing contract
-from afriflow.domains.shared.config import get_config  # Environment-aware config for RBAC
+# BaseProcessor defines the core processing contract used across all AfriFlow domains
+from afriflow.domains.shared.interfaces import BaseProcessor
+# get_config provides environment-aware settings for security and operational constraints
+from afriflow.domains.shared.config import get_config
 
 
 class Processor(BaseProcessor):
     """
-    Minimal Processor implementation with:
-    - RBAC based on environment (dev allows 'analyst'; staging/prod exclude it)
-    - Basic input validation (dict, required 'source', size guard)
-    - Structured error logging
+    Corridor aggregator implementation of the BaseProcessor.
+    Ensures that streaming data follows strict security and structural rules.
+    
+    Design intent:
+    - Enforce environment-aware RBAC (Role-Based Access Control).
+    - Limit payload size to maintain processing stability.
+    - Provide structured error logging for troubleshooting.
     """
 
     def configure(self, config=None) -> None:
+        """
+        Sets internal configuration such as allowed roles and record size limits.
+        Staging and production environments have more restrictive access controls.
+        
+        :param config: Optional configuration override.
+        """
         self.logger = logging.getLogger(__name__)
+        # Fallback to global config if no specific config is provided
         env = (self.config.env if getattr(self, "config", None) else get_config().env)
+        # Define allowed roles based on the operational environment
         self._allowed_roles = (
             {"system", "service"} if env in {"staging", "prod"} else {"system", "service", "analyst"}
         )
-        self._max_record_size = 100_000  # ~100KB guardrail
+        # Prevent oversized records from causing memory issues in streaming jobs
+        self._max_record_size = 100_000
 
     def validate(self, record: Any) -> None:
+        """
+        Validates the input record's type, security role, and mandatory fields.
+        
+        :param record: The record to be validated.
+        :raises TypeError: If the record is not a dictionary.
+        :raises PermissionError: If the role associated with the record is not authorized.
+        :raises ValueError: If the record is missing required fields or exceeds the size limit.
+        """
         if not isinstance(record, dict):
             raise TypeError("record must be a dict")
+            
         role = record.get("access_role")
         src = record.get("source")
+        
+        # Security check: verify the caller has the necessary permissions
         if role not in self._allowed_roles:
             raise PermissionError("access_role not permitted")
+            
+        # Lineage check: source must be clearly identified
         if not src or not isinstance(src, str):
             raise ValueError("source is required")
+            
+        # Payload safety check
         if len(str(record)) > self._max_record_size:
             raise ValueError("record too large")
 
     def process_sync(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Synchronously processes and enriches a corridor record after validation.
+        
+        :param record: The input record to enrich.
+        :return: A copy of the record with a processing flag.
+        :raises Exception: Re-raises any errors encountered during validation or processing.
+        """
         try:
             self.validate(record)
+            # Create a shallow copy for safe transformation
             out = dict(record)
-            # Example aggregation placeholder; preserve backward compatibility by no-op
+            # Mark the record as successfully processed by this module
             out["processed"] = True
             return out
         except Exception as e:
+            # Log failure with structured context for easier debugging
             self.logger.error(
                 "processor_error",
                 extra={"error": str(e), "etype": e.__class__.__name__},

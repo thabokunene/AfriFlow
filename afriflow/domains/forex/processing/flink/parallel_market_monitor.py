@@ -1,8 +1,8 @@
 """
 @file parallel_market_monitor.py
-@description Monitors parallel FX premiums, trends, and alerts with RBAC and structured logging
+@description Flink-based processor for monitoring divergence between official and parallel FX rates in African markets.
 @author Thabo Kunene
-@created 2026-03-17
+@created 2026-03-19
 """
 
 """
@@ -24,21 +24,32 @@ A widening premium signals:
 
 This processor implements security-hardened validation
 with RBAC and structured logging.
+
+DISCLAIMER: This project is not a sanctioned initiative
+of Standard Bank Group, MTN, or any affiliated entity.
+It is a demonstration of concept, domain knowledge,
+and data engineering skill by Thabo Kunene.
 """
 
+# Standard logging for operational observability and economic anomaly detection
 import logging
+# Type hinting for defining strong collection and functional contracts
 from typing import Any, Dict, Optional
 
+# BaseProcessor defines the core processing contract used across all AfriFlow domains
 from afriflow.domains.shared.interfaces import BaseProcessor
+# get_config provides environment-aware settings for security and operational constraints
 from afriflow.domains.shared.config import get_config
 
+# Initialize module-level logger for parallel market monitoring events
 logger = logging.getLogger(__name__)
 
 
-# Currencies with known parallel markets
+# List of ISO currency codes where parallel market activity is significant and monitored.
 PARALLEL_MARKET_CURRENCIES = {"NGN", "AOA", "ETB", "ZWL", "CDF", "SSP"}
 
-# Alert thresholds for parallel premium (%)
+# Percentage thresholds used to classify the severity of parallel market premiums.
+# A higher premium indicates greater economic stress or impending devaluation.
 PREMIUM_THRESHOLDS = {
     "low": 5.0,
     "moderate": 15.0,
@@ -49,28 +60,40 @@ PREMIUM_THRESHOLDS = {
 
 class Processor(BaseProcessor):
     """
-    Processor for monitoring parallel market premiums with:
-    - RBAC based on environment
-    - Input validation (dict, required fields, size guard)
-    - Premium calculation and alerting
-    - Structured error logging
+    Parallel market monitor implementation of the BaseProcessor.
+    Calculates the premium between official and street rates to identify financial risk.
+    
+    Design intent:
+    - Enforce environment-aware RBAC (Role-Based Access Control).
+    - Limit payload size to maintain processing stability.
+    - Track historical premiums for trend detection.
+    - Provide structured error logging for troubleshooting.
     """
 
     def configure(self, config: Optional[Any] = None) -> None:
-        """Configure the processor with environment-specific settings."""
+        """
+        Sets internal configuration such as allowed roles, required fields, and record size limits.
+        Staging and production environments have more restrictive access controls.
+        
+        :param config: Optional configuration override.
+        """
         self.logger = logging.getLogger(__name__)
+        # Fallback to global config if no specific config is provided
         cfg = self.config if hasattr(self, "config") and self.config else get_config()
         env = getattr(cfg, "env", "dev")
 
+        # Define allowed roles based on the operational environment
         self._allowed_roles = (
             {"system", "service"}
             if env in {"staging", "prod"}
             else {"system", "service", "analyst"}
         )
+        # Prevent oversized records from causing memory issues in streaming jobs
         self._max_record_size = 100_000
+        # Set of mandatory fields required for valid parallel market analysis
         self._required_fields = {"currency", "official_rate", "parallel_rate"}
 
-        # Track premium history for trend detection
+        # Internal state to track premium history for trend detection per currency
         self._premium_history: Dict[str, list] = {}
 
         self.logger.info(
@@ -80,15 +103,12 @@ class Processor(BaseProcessor):
 
     def validate(self, record: Any) -> None:
         """
-        Validate the input record.
-
-        Args:
-            record: Record to validate
-
-        Raises:
-            TypeError: If record is not a dict
-            PermissionError: If access_role not permitted
-            ValueError: If required fields missing or record too large
+        Validates the input record's type, security role, and mandatory fields.
+        
+        :param record: The record to be validated.
+        :raises TypeError: If the record is not a dictionary.
+        :raises PermissionError: If the access role is not authorized.
+        :raises ValueError: If required fields are missing or the record is too large.
         """
         if not isinstance(record, dict):
             raise TypeError("record must be a dict")
@@ -96,6 +116,7 @@ class Processor(BaseProcessor):
         role = record.get("access_role")
         src = record.get("source")
 
+        # Security check: verify the caller has the necessary permissions
         if role not in self._allowed_roles:
             raise PermissionError(
                 f"access_role '{role}' not permitted. "

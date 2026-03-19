@@ -1,11 +1,9 @@
 # =============================================================================
 # @file schema.yml
-# @description Insurance domain dbt schema definitions for insurance product
-#     data models including policy details, claims processing, risk assessment,
-#     and actuarial analytics. Defines data quality tests and regulatory
-#     compliance validation rules for insurance data pipelines.
+# @description dbt schema definitions for the insurance domain, including
+#     policy details, claims processing, and risk assessment models.
 # @author Thabo Kunene
-# @created 2026-03-18
+# @created 2026-03-19
 # =============================================================================
 
 version: 2
@@ -13,8 +11,8 @@ version: 2
 #
 # Insurance Domain dbt Schema Definitions
 #
-# We define tests, documentation, and column metadata
-# for all Insurance domain models.
+# These definitions provide metadata and data quality tests for insurance models,
+# ensuring data integrity for actuarial and risk reporting.
 #
 # Disclaimer: This project is not sanctioned by Standard Bank Group.
 #

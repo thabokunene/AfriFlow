@@ -1,14 +1,10 @@
 """
 @file multilingual_normaliser.py
-@description Multilingual Entity Name Normaliser for the AfriFlow entity resolution layer.
-             Normalises entity names across the full linguistic landscape of 20 African
-             markets: Bantu languages (Swahili, Zulu, Xhosa), Niger-Congo (Yoruba, Hausa),
-             French West/Central Africa, Romanised Arabic (North Africa), and English.
-             Without this normaliser, "Dangote Cement Plc", "DANGOTE CEMENT", and
-             "Dangote Cement Limited" produce three golden IDs instead of one. Also handles
-             MSISDN normalisation to E.164 format for mobile subscriber matching.
+@description Multilingual entity name normalizer for the AfriFlow entity resolution
+    layer, handling corporate suffixes, personal name conventions, and phonetic
+    substitutions across English, Swahili, Yoruba, Hausa, and French.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 import re                        # regex for tokenisation, suffix matching, and MSISDN cleaning

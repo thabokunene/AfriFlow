@@ -1,4 +1,11 @@
 """
+@file batch_sftp_ingester.py
+@description Batch ingester for Cell domain data via SFTP, supporting checksum validation and rotating logs.
+@author Thabo Kunene
+@created 2026-03-19
+"""
+
+"""
 Batch SFTP Ingester
 
 Usage:
@@ -14,31 +21,55 @@ Usage:
     )
 """
 
+# Enables postponed evaluation of type annotations for forward references
 from __future__ import annotations
 
+# Standard library for generating SHA-256 checksums for file integrity verification
 import hashlib
+# Standard library for interacting with the file system and environment variables
 import os
+# Dataclass for structured configuration objects
 from dataclasses import dataclass
+# Specialized logging handler for rotating log files to prevent disk saturation
 from logging.handlers import RotatingFileHandler
+# Typing hints for defining strong functional and collection contracts
 from typing import Callable, Iterable, List, Optional, Protocol
 
+# AfriFlow logging utility for consistent log formatting
 from afriflow.logging_config import get_logger
 
 
 def _setup_rotating_logger(name: str) -> any:
+    """
+    Configures a logger with a rotating file handler based on environment settings.
+    
+    :param name: The name of the logger (usually __name__).
+    :return: A configured logger instance.
+    """
     logger = get_logger(name)
+    # File path for the SFTP ingester logs
     log_file = os.environ.get("AF_CELL_SFTP_LOG_FILE", "logs/cell_sftp_ingester.log")
+    # Maximum size of a single log file before rotation (default 1MB)
     max_bytes = int(os.environ.get("AF_CELL_SFTP_LOG_MAX_BYTES", "1048576"))
+    # Number of old log files to keep
     backup_count = int(os.environ.get("AF_CELL_SFTP_LOG_BACKUP_COUNT", "5"))
+    
+    # Ensure the log directory exists
     os.makedirs(os.path.dirname(log_file) or ".", exist_ok=True)
+    
+    # Initialize and attach the rotating handler
     handler = RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count)
     logger.addHandler(handler)
+    # Set logging level (default INFO)
     logger.setLevel(os.environ.get("AF_CELL_SFTP_LOG_LEVEL", "INFO"))
     return logger
 
 
 @dataclass
 class SFTPConfig:
+    """
+    Configuration container for SFTP connection parameters.
+    """
     host: str
     port: int = 22
     username: Optional[str] = None
@@ -50,6 +81,11 @@ class SFTPConfig:
 
     @classmethod
     def from_env(cls) -> "SFTPConfig":
+        """
+        Loads SFTP configuration from environment variables with defaults.
+        
+        :return: An initialized SFTPConfig instance.
+        """
         return cls(
             host=os.environ.get("AF_CELL_SFTP_HOST", "localhost"),
             port=int(os.environ.get("AF_CELL_SFTP_PORT", "22")),
@@ -63,36 +99,78 @@ class SFTPConfig:
 
 
 class SFTPTransport(Protocol):
+    """
+    Structural protocol for SFTP transport implementations.
+    Allows for easy mocking during unit testing.
+    """
     def listdir(self, path: str) -> List[str]: ...
     def get(self, remote_path: str, local_path: str) -> None: ...
     def exists(self, remote_path: str) -> bool: ...
 
 
 class BatchSFTPIngester:
+    """
+    Handles the batch downloading and validation of files from a remote SFTP server.
+    """
     def __init__(self, config: SFTPConfig, transport: Optional[SFTPTransport] = None) -> None:
+        """
+        Initializes the ingester with configuration and an optional transport.
+        
+        :param config: SFTP connection configuration.
+        :param transport: Implementation of SFTPTransport (e.g., paramiko wrapper).
+        """
         self.config = config
         self.transport = transport
         self._logger = _setup_rotating_logger(__name__)
 
     def _ensure_transport(self) -> SFTPTransport:
+        """
+        Verifies that a transport implementation is available.
+        
+        :return: The SFTP transport instance.
+        :raises RuntimeError: If no transport was provided.
+        """
         if self.transport:
             return self.transport
         raise RuntimeError("No SFTP transport provided; inject via constructor")
 
     def _checksum(self, path: str) -> str:
+        """
+        Calculates the SHA-256 checksum of a local file.
+        
+        :param path: Path to the local file.
+        :return: Hexadecimal string of the checksum.
+        """
         h = hashlib.sha256()
         with open(path, "rb") as f:
+            # Read in 8KB chunks to handle large files without high memory usage
             for chunk in iter(lambda: f.read(8192), b""):
                 h.update(chunk)
         return h.hexdigest()
 
     def _validate_checksum(self, local_path: str, checksum: str) -> bool:
+        """
+        Compares a file's actual checksum with an expected value.
+        
+        :param local_path: Path to the downloaded file.
+        :param checksum: The expected checksum string.
+        :return: True if they match, False otherwise.
+        """
         try:
             return self._checksum(local_path) == checksum.lower()
         except Exception:
+            # Catch file access errors and treat as validation failure
             return False
 
     def _download_batch(self, files: Iterable[str], remote_dir: str, local_dir: str) -> List[str]:
+        """
+        Downloads a list of files from the remote directory to the local directory.
+        
+        :param files: List of filenames to download.
+        :param remote_dir: Path to the remote directory.
+        :param local_dir: Path to the local destination directory.
+        :return: List of successfully downloaded local file paths.
+        """
         t = self._ensure_transport()
         os.makedirs(local_dir or ".", exist_ok=True)
         downloaded: List[str] = []

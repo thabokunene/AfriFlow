@@ -1,8 +1,8 @@
 """
 @file hedge_gap_detector.py
-@description Detects hedge-exposure mismatches and classifies severity with RBAC safeguards
+@description Flink-based processor for detecting mismatches between hedge instruments and underlying exposures in the Forex domain.
 @author Thabo Kunene
-@created 2026-03-17
+@created 2026-03-19
 """
 
 """
@@ -16,37 +16,59 @@ underlying exposures. A hedge gap occurs when:
 
 This processor implements security-hardened validation
 with RBAC and structured logging.
+
+DISCLAIMER: This project is not a sanctioned initiative
+of Standard Bank Group, MTN, or any affiliated entity.
+It is a demonstration of concept, domain knowledge,
+and data engineering skill by Thabo Kunene.
 """
 
-import logging  # Operational logging for configuration, validation, and analysis outcomes
+# Standard logging for operational observability and security auditing
+import logging
+# Type hinting for defining strong collection and functional contracts
 from typing import Any, Dict, Optional
 
-from afriflow.domains.shared.interfaces import BaseProcessor  # Minimal processing interface
-from afriflow.domains.shared.config import get_config  # Environment-aware configuration for RBAC
+# BaseProcessor defines the core processing contract used across all AfriFlow domains
+from afriflow.domains.shared.interfaces import BaseProcessor
+# get_config provides environment-aware settings for security and operational constraints
+from afriflow.domains.shared.config import get_config
 
-logger = logging.getLogger(__name__)  # Module-level logger for this processor
+# Initialize module-level logger for the hedge gap detector
+logger = logging.getLogger(__name__)
 
 
 class Processor(BaseProcessor):
     """
-    Processor for detecting hedge gaps with:
-    - RBAC based on environment
-    - Input validation (dict, required fields, size guard)
-    - Structured error logging
+    Hedge gap detector implementation of the BaseProcessor.
+    Ensures that hedging data is validated and compared against underlying exposures to identify risk gaps.
+    
+    Design intent:
+    - Enforce environment-aware RBAC (Role-Based Access Control).
+    - Limit payload size to maintain processing stability.
+    - Provide structured error logging for troubleshooting.
     """
 
     def configure(self, config: Optional[Any] = None) -> None:
-        """Configure the processor with environment-specific settings."""
+        """
+        Sets internal configuration such as allowed roles, required fields, and record size limits.
+        Staging and production environments have more restrictive access controls.
+        
+        :param config: Optional configuration override.
+        """
         self.logger = logging.getLogger(__name__)
+        # Fallback to global config if no specific config is provided
         cfg = self.config if hasattr(self, "config") and self.config else get_config()
         env = getattr(cfg, "env", "dev")
 
+        # Define allowed roles based on the operational environment
         self._allowed_roles = (
             {"system", "service"}
             if env in {"staging", "prod"}
             else {"system", "service", "analyst"}
         )
-        self._max_record_size = 100_000  # ~100KB guardrail
+        # Prevent oversized records from causing memory issues in streaming jobs
+        self._max_record_size = 100_000
+        # Set of mandatory fields required for valid hedge gap analysis
         self._required_fields = {
             "hedge_id", "client_id", "currency_pair",
             "notional_base", "underlying_exposure_id"
@@ -59,15 +81,12 @@ class Processor(BaseProcessor):
 
     def validate(self, record: Any) -> None:
         """
-        Validate the input record.
-
-        Args:
-            record: Record to validate
-
-        Raises:
-            TypeError: If record is not a dict
-            PermissionError: If access_role not permitted
-            ValueError: If required fields missing or record too large
+        Validates the input record's type, security role, mandatory fields, and values.
+        
+        :param record: The record to be validated.
+        :raises TypeError: If the record is not a dictionary.
+        :raises PermissionError: If the access role is not authorized.
+        :raises ValueError: If required fields are missing, the record is too large, or values are invalid.
         """
         if not isinstance(record, dict):
             raise TypeError("record must be a dict")
@@ -75,27 +94,29 @@ class Processor(BaseProcessor):
         role = record.get("access_role")
         src = record.get("source")
 
+        # Security check: verify the caller has the necessary permissions
         if role not in self._allowed_roles:
             raise PermissionError(
                 f"access_role '{role}' not permitted. "
                 f"Allowed: {self._allowed_roles}"
             )
 
+        # Lineage check: source must be clearly identified
         if not src or not isinstance(src, str):
             raise ValueError("source is required and must be a string")
 
-        # Check required fields for hedge gap detection
+        # Structural check: ensure all mandatory fields for gap detection are present
         missing = self._required_fields - set(record.keys())
         if missing:
             raise ValueError(f"Missing required fields: {missing}")
 
-        # Size guard
+        # Payload safety check
         if len(str(record)) > self._max_record_size:
             raise ValueError(
                 f"record size exceeds limit ({self._max_record_size} bytes)"
             )
 
-        # Validate notional is positive
+        # Data quality check: ensure notional amount is a positive number
         notional = record.get("notional_base")
         if notional is not None and (
             not isinstance(notional, (int, float)) or notional <= 0
