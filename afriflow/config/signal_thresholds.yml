@@ -1,0 +1,34 @@
+# Signal Detection Thresholds
+# Minimum evidence required to trigger signals
+
+expansion:
+  min_cib_payments: 3
+  min_cib_value_zar: 1000000
+  min_sim_activations: 20
+  min_forex_trades: 2
+  min_pbb_accounts: 5
+
+leakage:
+  min_volume_ratio: 0.10
+  min_transaction_count: 10
+  confidence_threshold: 0.70
+
+hedge_gap:
+  min_exposure_zar: 500000
+  days_without_hedge: 30
+  confidence_threshold: 0.75
+
+workforce:
+  min_sims: 50
+  min_activity_days: 14
+  confidence_threshold: 0.65
+
+insurance_gap:
+  min_cib_volume_zar: 1000000
+  days_without_coverage: 60
+  confidence_threshold: 0.70
+
+currency_cascade:
+  min_devaluation_pct: 5.0
+  min_exposure_zar: 1000000
+  confidence_threshold: 0.80

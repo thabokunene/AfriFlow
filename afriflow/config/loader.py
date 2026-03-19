@@ -11,25 +11,30 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
+from __future__ import annotations
+
+import os
 import yaml
 from pathlib import Path
 from typing import Optional, Dict, Any
+import logging
 
 from afriflow.config.settings import (
     Settings,
-    RevenueEstimates,
-    ExpansionThresholds,
     SimDeflationConfig,
-    CurrencyThreshold,
-    SeasonalPattern,
+    SeasonalWeightConfig,
+    SignalThresholds,
+    LekgotlaConfig,
+    CorridorConfig,
+    ModerationPatterns,
 )
-from afriflow.exceptions import ConfigurationError
-from afriflow.logging_config import get_logger
+from afriflow.exceptions import ConfigurationError, MissingConfigError, InvalidConfigError
+from afriflow.logging_config import get_logger, log_operation
 
 logger = get_logger("config.loader")
 
 # Default configuration paths
-DEFAULT_CONFIG_DIR = Path(__file__).parent.parent / "config"
+DEFAULT_CONFIG_DIR = Path(__file__).parent
 
 
 class ConfigLoader:
@@ -39,9 +44,14 @@ class ConfigLoader:
     Configuration is loaded once at startup and cached.
     All configuration access should go through this loader
     to ensure consistency and validation.
+
+    Attributes:
+        config_dir: Directory containing config files
+        _settings: Cached Settings object
+        _raw_config: Raw configuration dictionary
     """
 
-    def __init__(self, config_dir: Optional[Path] = None):
+    def __init__(self, config_dir: Optional[Path] = None) -> None:
         """
         Initialize the configuration loader.
 
@@ -75,50 +85,49 @@ class ConfigLoader:
         logger.info("Loading configuration files...")
 
         try:
-            # Load revenue estimates
-            revenue_data = self._load_yaml_file(
-                "sim_deflation_factors.yml"
-            )
-            revenue_estimates = self._parse_revenue_estimates(
-                revenue_data
-            )
-
-            # Load expansion thresholds
-            expansion_data = self._load_yaml_file(
-                "expansion_thresholds.yml"
-            )
-            expansion_thresholds = self._parse_expansion_thresholds(
-                expansion_data
-            )
-
             # Load SIM deflation factors
             sim_deflation = self._load_sim_deflation(
-                "sim_deflation_factors.yml"
+                "sim_deflation.yml"
             )
 
-            # Load currency thresholds
-            currency_thresholds = self._load_currency_thresholds(
-                "currency_thresholds.yml"
+            # Load seasonal weights
+            seasonal_weights = self._load_seasonal_weights(
+                "seasonal_weights.yml"
             )
 
-            # Load seasonal patterns
-            seasonal_patterns = self._load_seasonal_patterns(
-                "seasonal_calendars/southern_africa_agriculture.yml"
+            # Load signal thresholds
+            signal_thresholds = self._load_signal_thresholds(
+                "signal_thresholds.yml"
+            )
+
+            # Load Lekgotla config
+            lekgotla = self._load_lekgotla_config(
+                "lekgotla_config.yml"
+            )
+
+            # Load corridor config
+            corridor = self._load_corridor_config(
+                "corridor_config.yml"
+            )
+
+            # Load moderation patterns
+            moderation = self._load_moderation_patterns(
+                "moderation_patterns.yml"
             )
 
             self._settings = Settings(
-                revenue_estimates=revenue_estimates,
-                expansion_thresholds=expansion_thresholds,
                 sim_deflation=sim_deflation,
-                currency_thresholds=currency_thresholds,
-                seasonal_patterns=seasonal_patterns,
+                seasonal_weights=seasonal_weights,
+                signal_thresholds=signal_thresholds,
+                lekgotla=lekgotla,
+                corridor=corridor,
+                moderation=moderation,
             )
 
             logger.info(
                 f"Configuration loaded successfully: "
                 f"{len(sim_deflation)} countries, "
-                f"{len(currency_thresholds)} currencies, "
-                f"{len(seasonal_patterns)} seasonal patterns"
+                f"{len(seasonal_weights)} seasonal patterns"
             )
 
             return self._settings
@@ -175,76 +184,11 @@ class ConfigLoader:
                 f"Cannot read {filepath}: {e}"
             )
 
-    def _parse_revenue_estimates(
-        self,
-        data: Dict[str, Any]
-    ) -> RevenueEstimates:
-        """Parse revenue estimates from config data."""
-        try:
-            return RevenueEstimates()
-        except Exception as e:
-            logger.warning(
-                f"Using default revenue estimates: {e}"
-            )
-            return RevenueEstimates()
-
-    def _parse_expansion_thresholds(
-        self,
-        data: Dict[str, Any]
-    ) -> ExpansionThresholds:
-        """
-        Parse expansion thresholds from config data.
-
-        Args:
-            data: Raw configuration data from YAML file
-
-        Returns:
-            Validated ExpansionThresholds object
-        """
-        try:
-            min_evidence = data.get("min_evidence", {})
-            
-            return ExpansionThresholds(
-                min_cib_payments_for_signal=min_evidence.get(
-                    "cib_payments_count",
-                    ExpansionThresholds.model_fields["min_cib_payments_for_signal"].default
-                ),
-                min_cib_value_for_signal=min_evidence.get(
-                    "cib_value_zar",
-                    ExpansionThresholds.model_fields["min_cib_value_for_signal"].default
-                ),
-                min_sim_activations_for_signal=min_evidence.get(
-                    "sim_activations_count",
-                    ExpansionThresholds.model_fields["min_sim_activations_for_signal"].default
-                ),
-                min_forex_trades_for_signal=min_evidence.get(
-                    "forex_trades_count",
-                    ExpansionThresholds.model_fields["min_forex_trades_for_signal"].default
-                ),
-                min_pbb_accounts_for_signal=min_evidence.get(
-                    "pbb_accounts_count",
-                    ExpansionThresholds.model_fields["min_pbb_accounts_for_signal"].default
-                ),
-            )
-        except Exception as e:
-            logger.warning(
-                f"Using default expansion thresholds: {e}"
-            )
-            return ExpansionThresholds()
-
     def _load_sim_deflation(
         self,
         filename: str
     ) -> Dict[str, SimDeflationConfig]:
-        """
-        Load SIM deflation factors from config file.
-
-        Args:
-            filename: Name of the config file
-
-        Returns:
-            Dictionary mapping country codes to configs
-        """
+        """Load SIM deflation factors from config file."""
         data = self._load_yaml_file(filename)
         country_factors = data.get("country_factors", {})
 
@@ -277,70 +221,21 @@ class ConfigLoader:
         )
         return result
 
-    def _load_currency_thresholds(
+    def _load_seasonal_weights(
         self,
         filename: str
-    ) -> Dict[str, CurrencyThreshold]:
-        """
-        Load currency thresholds from config file.
-
-        Args:
-            filename: Name of the config file
-
-        Returns:
-            Dictionary mapping currency codes to thresholds
-        """
-        data = self._load_yaml_file(filename)
-        thresholds = data.get("thresholds", {})
-
-        result = {}
-        for currency, values in thresholds.items():
-            try:
-                result[currency.upper()] = CurrencyThreshold(
-                    devaluation_pct=values.get(
-                        "devaluation_pct", 10.0
-                    ),
-                    rapid_depreciation_pct=values.get(
-                        "rapid_depreciation_pct", 5.0
-                    ),
-                    parallel_divergence_pct=values.get(
-                        "parallel_divergence_pct", 20.0
-                    ),
-                    notes=values.get("notes"),
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Invalid currency threshold for "
-                    f"{currency}: {e}"
-                )
-
-        logger.info(
-            f"Loaded {len(result)} currency thresholds"
-        )
-        return result
-
-    def _load_seasonal_patterns(
-        self,
-        filename: str
-    ) -> list[SeasonalPattern]:
-        """
-        Load seasonal patterns from config file.
-
-        Args:
-            filename: Name of the config file
-
-        Returns:
-            List of SeasonalPattern objects
-        """
+    ) -> Dict[str, SeasonalWeightConfig]:
+        """Load seasonal weights from config file."""
         data = self._load_yaml_file(filename)
         seasons = data.get("seasons", {})
 
-        result = []
+        result = {}
         for commodity, countries in seasons.items():
             for country_code, patterns in countries.items():
                 for pattern in patterns:
+                    key = f"{commodity}_{country_code}"
                     try:
-                        result.append(SeasonalPattern(
+                        result[key] = SeasonalWeightConfig(
                             commodity=commodity,
                             country_code=country_code.upper(),
                             peak_months=pattern.get(
@@ -352,19 +247,13 @@ class ConfigLoader:
                             flow_type=pattern.get(
                                 "flow_type", "export"
                             ),
-                            expected_peak_multiplier=(
-                                pattern.get(
-                                    "expected_peak_multiplier",
-                                    1.5
-                                )
+                            expected_peak_multiplier=pattern.get(
+                                "expected_peak_multiplier", 1.5
                             ),
-                            expected_trough_multiplier=(
-                                pattern.get(
-                                    "expected_trough_multiplier",
-                                    0.5
-                                )
+                            expected_trough_multiplier=pattern.get(
+                                "expected_trough_multiplier", 0.5
                             ),
-                        ))
+                        )
                     except Exception as e:
                         logger.warning(
                             f"Invalid seasonal pattern for "
@@ -375,6 +264,151 @@ class ConfigLoader:
             f"Loaded {len(result)} seasonal patterns"
         )
         return result
+
+    def _load_signal_thresholds(
+        self,
+        filename: str
+    ) -> SignalThresholds:
+        """Load signal thresholds from config file."""
+        data = self._load_yaml_file(filename)
+
+        try:
+            expansion = data.get("expansion", {})
+            return SignalThresholds(
+                expansion_min_cib_payments=expansion.get(
+                    "min_cib_payments",
+                    SignalThresholds.model_fields[
+                        "expansion_min_cib_payments"
+                    ].default
+                ),
+                expansion_min_cib_value=expansion.get(
+                    "min_cib_value_zar",
+                    SignalThresholds.model_fields[
+                        "expansion_min_cib_value"
+                    ].default
+                ),
+                expansion_min_sim_activations=expansion.get(
+                    "min_sim_activations",
+                    SignalThresholds.model_fields[
+                        "expansion_min_sim_activations"
+                    ].default
+                ),
+            )
+        except Exception as e:
+            logger.warning(
+                f"Using default signal thresholds: {e}"
+            )
+            return SignalThresholds()
+
+    def _load_lekgotla_config(
+        self,
+        filename: str
+    ) -> LekgotlaConfig:
+        """Load Lekgotla configuration from config file."""
+        data = self._load_yaml_file(filename)
+
+        try:
+            points = data.get("points", {})
+            graduation = data.get("graduation", {})
+            notification = data.get("notification", {})
+
+            return LekgotlaConfig(
+                thread_points=points.get("thread_created", 10),
+                reply_points=points.get("reply_posted", 5),
+                solution_points=points.get("solution_marked", 25),
+                card_contribution_points=points.get(
+                    "card_contributed", 50
+                ),
+                card_publication_points=points.get(
+                    "card_published", 100
+                ),
+                upvote_received_points=points.get(
+                    "upvote_received", 2
+                ),
+                graduation_min_upvotes=graduation.get(
+                    "min_upvotes", 10
+                ),
+                graduation_min_contributors=graduation.get(
+                    "min_contributors", 3
+                ),
+                notification_batch_size=notification.get(
+                    "batch_size", 100
+                ),
+                notification_delay_seconds=notification.get(
+                    "delay_seconds", 300
+                ),
+            )
+        except Exception as e:
+            logger.warning(
+                f"Using default Lekgotla config: {e}"
+            )
+            return LekgotlaConfig()
+
+    def _load_corridor_config(
+        self,
+        filename: str
+    ) -> CorridorConfig:
+        """Load corridor configuration from config file."""
+        data = self._load_yaml_file(filename)
+
+        try:
+            leakage = data.get("leakage_detection", {})
+            capture = data.get("capture_expectations", {})
+            informal = data.get("informal_detection", {})
+
+            return CorridorConfig(
+                leakage_detection_threshold=leakage.get(
+                    "threshold", 0.10
+                ),
+                fx_capture_expected_pct=capture.get(
+                    "fx_pct", 0.60
+                ),
+                insurance_capture_expected_pct=capture.get(
+                    "insurance_pct", 0.30
+                ),
+                payroll_capture_expected_pct=capture.get(
+                    "payroll_pct", 0.40
+                ),
+                informal_ratio_alert_threshold=informal.get(
+                    "momo_cib_ratio_threshold", 1.0
+                ),
+            )
+        except Exception as e:
+            logger.warning(
+                f"Using default corridor config: {e}"
+            )
+            return CorridorConfig()
+
+    def _load_moderation_patterns(
+        self,
+        filename: str
+    ) -> ModerationPatterns:
+        """Load moderation patterns from config file."""
+        data = self._load_yaml_file(filename)
+
+        try:
+            patterns = data.get("patterns", {})
+            auto_flag = data.get("auto_flag", {})
+            review = data.get("review", {})
+
+            return ModerationPatterns(
+                confidential_patterns=patterns.get(
+                    "confidential", []
+                ),
+                spam_patterns=patterns.get("spam", []),
+                inappropriate_patterns=patterns.get(
+                    "inappropriate", []
+                ),
+                auto_flag_enabled=auto_flag.get("enabled", True),
+                require_review_before_publish=review.get(
+                    "require_before_publish", False
+                ),
+            )
+        except Exception as e:
+            logger.warning(
+                f"Using default moderation patterns: {e}"
+            )
+            return ModerationPatterns()
 
     def reload(self) -> Settings:
         """
@@ -437,3 +471,10 @@ def load_config(
     """
     loader = ConfigLoader(config_dir)
     return loader.load()
+
+
+__all__ = [
+    "ConfigLoader",
+    "load_config",
+    "get_settings",
+]

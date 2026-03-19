@@ -11,6 +11,8 @@ It is a demonstration of concept, domain knowledge,
 and data engineering skill by Thabo Kunene.
 """
 
+from __future__ import annotations
+
 import logging
 import sys
 import json
@@ -65,6 +67,7 @@ class ContextFilter(logging.Filter):
     - correlation_id: For tracing requests across modules
     - user_id: User identifier if available
     - session_id: Session identifier if available
+    - country: Country code for federated operations
     """
 
     def __init__(
@@ -72,10 +75,12 @@ class ContextFilter(logging.Filter):
         correlation_id: Optional[str] = None,
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
-    ):
+        country: Optional[str] = None,
+    ) -> None:
         self.correlation_id = correlation_id
         self.user_id = user_id
         self.session_id = session_id
+        self.country = country
 
     def filter(self, record: logging.LogRecord) -> bool:
         """Add context to log record."""
@@ -87,6 +92,8 @@ class ContextFilter(logging.Filter):
             record.extra_fields["user_id"] = self.user_id
         if self.session_id:
             record.extra_fields["session_id"] = self.session_id
+        if self.country:
+            record.extra_fields["country"] = self.country
 
         return True
 
@@ -201,19 +208,22 @@ class LoggingContext:
         correlation_id: Optional[str] = None,
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
-    ):
+        country: Optional[str] = None,
+    ) -> None:
         self.correlation_id = correlation_id
         self.user_id = user_id
         self.session_id = session_id
-        self._old_filters = []
+        self.country = country
+        self._old_filters: list = []
 
-    def __enter__(self):
+    def __enter__(self) -> LoggingContext:
         """Add context filters to all handlers."""
         root_logger = logging.getLogger()
         context_filter = ContextFilter(
             correlation_id=self.correlation_id,
             user_id=self.user_id,
             session_id=self.session_id,
+            country=self.country,
         )
 
         for handler in root_logger.handlers:
@@ -222,7 +232,7 @@ class LoggingContext:
 
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Remove context filters from all handlers."""
         root_logger = logging.getLogger()
         for i, handler in enumerate(root_logger.handlers):
@@ -233,7 +243,7 @@ def log_operation(
     logger: logging.Logger,
     operation: str,
     status: str = "started",
-    **kwargs
+    **kwargs: Any
 ) -> None:
     """
     Log an operation with standard fields.
@@ -271,3 +281,13 @@ def log_operation(
         logger.info(f"Operation {operation} completed", extra=extra)
     else:
         logger.debug(f"Operation {operation} started", extra=extra)
+
+
+__all__ = [
+    "JSONFormatter",
+    "ContextFilter",
+    "setup_logging",
+    "get_logger",
+    "LoggingContext",
+    "log_operation",
+]

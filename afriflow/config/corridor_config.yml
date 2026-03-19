@@ -1,0 +1,29 @@
+# Corridor Configuration
+# Cross-border intelligence settings
+
+leakage_detection:
+  threshold: 0.10
+  min_volume_zar: 100000
+  confidence_threshold: 0.75
+
+capture_expectations:
+  fx_pct: 0.60
+  insurance_pct: 0.30
+  payroll_pct: 0.40
+
+informal_detection:
+  momo_cib_ratio_threshold: 1.0
+  min_momo_volume_zar: 50000
+  alert_on_high_ratio: true
+
+revenue_attribution:
+  window_days: 90
+  domains: ["CIB", "FOREX", "INSURANCE", "CELL", "PBB"]
+
+priority_corridors:
+  - "ZA > NG"
+  - "ZA > KE"
+  - "ZA > GH"
+  - "ZA > TZ"
+  - "ZA > ZM"
+  - "ZA > MZ"

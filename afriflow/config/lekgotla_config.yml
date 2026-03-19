@@ -1,0 +1,41 @@
+# Lekgotla Configuration
+# Collective intelligence platform settings
+
+points:
+  thread_created: 10
+  reply_posted: 5
+  solution_marked: 25
+  card_contributed: 50
+  card_published: 100
+  upvote_received: 2
+  regulatory_post: 30
+
+levels:
+  - threshold: 0
+    name: "newcomer"
+  - threshold: 100
+    name: "contributor"
+  - threshold: 500
+    name: "active_contributor"
+  - threshold: 1500
+    name: "expert"
+  - threshold: 5000
+    name: "thought_leader"
+  - threshold: 15000
+    name: "legend"
+
+graduation:
+  min_upvotes: 10
+  min_contributors: 3
+  min_days_active: 7
+  require_solution: true
+
+notification:
+  batch_size: 100
+  delay_seconds: 300
+  max_per_user_per_day: 50
+
+moderation:
+  auto_flag_enabled: true
+  require_review_for_new_users: true
+  new_user_threshold_days: 30

@@ -1,0 +1,73 @@
+# Seasonal Weight Configuration
+# Adjustment weights for commodity-based signal detection
+
+seasons:
+  cocoa:
+    GH:
+      - peak_months: [10, 11, 12]
+        trough_months: [3, 4, 5]
+        flow_type: export
+        expected_peak_multiplier: 3.0
+        expected_trough_multiplier: 0.2
+    CI:
+      - peak_months: [10, 11, 12, 1]
+        trough_months: [4, 5, 6]
+        flow_type: export
+        expected_peak_multiplier: 2.8
+        expected_trough_multiplier: 0.25
+
+  coffee:
+    KE:
+      - peak_months: [4, 5, 6]
+        trough_months: [10, 11, 12]
+        flow_type: export
+        expected_peak_multiplier: 2.5
+        expected_trough_multiplier: 0.3
+    UG:
+      - peak_months: [3, 4, 5]
+        trough_months: [9, 10, 11]
+        flow_type: export
+        expected_peak_multiplier: 2.3
+        expected_trough_multiplier: 0.35
+
+  copper:
+    ZM:
+      - peak_months: [5, 6, 7, 8]
+        trough_months: [12, 1, 2]
+        flow_type: export
+        expected_peak_multiplier: 1.8
+        expected_trough_multiplier: 0.5
+    CD:
+      - peak_months: [4, 5, 6, 7]
+        trough_months: [11, 12, 1]
+        flow_type: export
+        expected_peak_multiplier: 1.6
+        expected_trough_multiplier: 0.55
+
+  maize:
+    ZA:
+      - peak_months: [5, 6, 7]
+        trough_months: [11, 12, 1]
+        flow_type: domestic
+        expected_peak_multiplier: 2.0
+        expected_trough_multiplier: 0.4
+    ZM:
+      - peak_months: [4, 5, 6]
+        trough_months: [10, 11, 12]
+        flow_type: domestic
+        expected_peak_multiplier: 1.9
+        expected_trough_multiplier: 0.45
+
+  oil:
+    NG:
+      - peak_months: [6, 7, 8]
+        trough_months: [12, 1, 2]
+        flow_type: export
+        expected_peak_multiplier: 1.5
+        expected_trough_multiplier: 0.6
+    AO:
+      - peak_months: [5, 6, 7]
+        trough_months: [11, 12, 1]
+        flow_type: export
+        expected_peak_multiplier: 1.4
+        expected_trough_multiplier: 0.65

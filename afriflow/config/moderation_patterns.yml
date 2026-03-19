@@ -1,0 +1,33 @@
+# Moderation Patterns Configuration
+# Content filtering and review settings
+
+patterns:
+  confidential:
+    - "client\\s*(name|number|id)\\s*[:\\s]*\\w+"
+    - "account\\s*(number|id)\\s*[:\\s]*\\d+"
+    - "password|credential|secret"
+    - "internal\\s*(memo|document|report)"
+    - "confidential|proprietary"
+
+  spam:
+    - "http[s]?://\\S+"
+    - "\\b(CALL|CONTACT|CLICK)\\s+(NOW|TODAY)\\b"
+    - "\\b(FREE|WIN|PRIZE)\\b"
+    - "\\b(URGENT|ACT NOW)\\b"
+
+  inappropriate:
+    - "\\b(profanity_placeholder)\\b"
+
+auto_flag:
+  enabled: true
+  threshold_score: 0.7
+  notify_moderators: true
+
+review:
+  require_before_publish: false
+  require_for_new_users: true
+  new_user_days: 30
+
+escalation:
+  auto_escalate_after_hours: 24
+  escalate_to_role: "compliance_officer"

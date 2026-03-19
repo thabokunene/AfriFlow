@@ -1,0 +1,33 @@
+# AfriFlow Default Configuration
+# Base defaults for all modules
+
+# Application settings
+app:
+  name: "AfriFlow"
+  version: "2.0.0"
+  environment: "development"
+
+# Logging settings
+logging:
+  level: "INFO"
+  json_format: true
+  log_file: "logs/afriflow.log"
+
+# Database settings
+database:
+  host: "localhost"
+  port: 5432
+  name: "afriflow"
+  pool_size: 10
+
+# Kafka settings
+kafka:
+  bootstrap_servers: "localhost:9092"
+  consumer_group: "afriflow-consumer"
+
+# Feature flags
+features:
+  lekgotla_enabled: true
+  corridor_enabled: true
+  outcome_tracking_enabled: true
+  ml_models_enabled: false
