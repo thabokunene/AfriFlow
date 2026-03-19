@@ -1,110 +1,115 @@
 """
 @file talking_points_engine.py
 @description Lexical talking-points engine for AfriFlow client briefings.
-
-             Given raw text (or a list of texts, a JSON file, or a CSV file),
-             the engine extracts the most frequent non-stop-word topics and
-             converts each into a concise, deduplicated talking point.  Quality
-             is measured along three dimensions — relevance, conciseness, and
-             uniqueness — and only points that pass all three thresholds are
-             emitted.
-
-             Output can be rendered as structured JSON (default), Markdown, or
-             plain numbered text.
-
-             DISCLAIMER: This project is not sanctioned by, affiliated with, or
-             endorsed by Standard Bank Group, MTN Group, or any of their
-             subsidiaries. It is a demonstration of concept, domain knowledge,
-             and technical skill built by Thabo Kunene for portfolio and
-             learning purposes only.
+             Extracts key topics from raw text and converts them into concise,
+             deduplicated talking points. Measured along relevance, conciseness,
+             and uniqueness dimensions. Supports JSON, Markdown, and plain text
+             output formats.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
-# Python 3.10+ union-type annotations without importing Union explicitly
+# Talking Points Engine
+#
+# Lexical engine that extracts key topics from raw text inputs and
+# converts them into structured, high-quality talking points for RMs.
+#
+# Disclaimer: Portfolio project by Thabo Kunene. Not a
+# Standard Bank Group product. All data is simulated.
+
+# Future import for forward references in type hints
 from __future__ import annotations
 
-# Standard-library imports
-import csv                              # For reading CSV input files
-import json                             # For reading JSON input files
-import logging                          # Structured logging throughout the engine
-import os                               # File-existence checks and path operations
-import re                               # Tokenisation via regex word extraction
-import time                             # Latency simulation and timeout enforcement
-from collections import Counter         # Frequency counting for topic extraction
-from dataclasses import dataclass       # Lightweight config and result containers
-from functools import lru_cache         # Cache repeated extract_key_topics calls
-from logging.handlers import RotatingFileHandler  # File-based log rotation
+# Standard-library imports for file processing, logging, and data handling
+import csv
+import json
+import logging
+import os
+import re
+import time
+from collections import Counter
+from dataclasses import dataclass
+from functools import lru_cache
+from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 
 # ---------------------------------------------------------------------------
-# Custom exceptions — raised instead of bare Exception for precise handling
+# Custom exceptions
 # ---------------------------------------------------------------------------
 
 class ModelLoadError(Exception):
     """Raised when the NLP model fails to load."""
+    pass
 
 
 class EmptyInputError(Exception):
     """Raised when input text is empty or missing."""
+    pass
 
 
 class ProcessingTimeoutError(Exception):
     """Raised when processing exceeds the configured timeout."""
+    pass
 
 
 # ---------------------------------------------------------------------------
-# Configuration dataclass — all engine tunables in one place
+# Configuration dataclass
 # ---------------------------------------------------------------------------
 
 @dataclass
 class TalkingPointsConfig:
-    """Configuration for TalkingPointsEngine."""
+    """
+    Configuration for TalkingPointsEngine.
 
-    # Path to an external NLP model; None means use the built-in lexical model
+    :param model_path: Path to external model; None uses built-in lexical model
+    :param max_topics: Max distinct topics to extract
+    :param max_points: Max talking points to emit
+    :param max_point_words: Conciseness threshold (max words per point)
+    :param timeout_seconds: Hard wall on processing time
+    :param log_path: Path for rotating log file; None uses console
+    :param log_level: Python logging level
+    :param log_max_bytes: Max log file size before rotation
+    :param log_backup_count: Number of rotated log files to retain
+    :param output_format: "json", "markdown", or "text"
+    :param simulate_latency_ms: Artificial latency for load testing
+    :param min_uniqueness_ratio: Threshold for point uniqueness (0-1)
+    :param min_relevance_ratio: Threshold for point relevance (0-1)
+    """
+
     model_path: Optional[str] = None
-    # Maximum number of distinct topics to extract per input text
     max_topics: int = 8
-    # Maximum number of talking points to emit per input text
     max_points: int = 6
-    # Maximum word count for a single talking point (conciseness threshold)
     max_point_words: int = 24
-    # Hard wall on total processing time in seconds
     timeout_seconds: float = 2.0
-    # Optional path for a rotating log file; None means console-only
     log_path: Optional[str] = None
-    # Python logging level (e.g. logging.INFO)
     log_level: int = logging.INFO
-    # Maximum log file size before rotation kicks in
     log_max_bytes: int = 512_000
-    # Number of rotated log files to retain
     log_backup_count: int = 3
-    # Default output format: "json" | "markdown" | "text"
     output_format: str = "json"
-    # Optional artificial latency in milliseconds (useful for load testing)
     simulate_latency_ms: int = 0
-    # Minimum uniqueness score (0–1) a candidate point must reach
     min_uniqueness_ratio: float = 0.6
-    # Minimum relevance score (0–1) a candidate point must reach
     min_relevance_ratio: float = 0.5
 
 
 # ---------------------------------------------------------------------------
-# Result dataclass — one per emitted talking point
+# Result dataclass
 # ---------------------------------------------------------------------------
 
 @dataclass
 class TalkingPoint:
-    """A single talking point with quality metrics."""
+    """
+    A single generated talking point with quality metrics.
 
-    # The generated talking-point string
+    :param text: The talking point string
+    :param relevance: Topic relationship score (0-1)
+    :param conciseness: Word count efficiency score (0-1)
+    :param uniqueness: Distinctness score (0-1)
+    """
+
     text: str
-    # How well the point relates to the dominant topics (0–1)
     relevance: float
-    # Inverse of word count relative to max_point_words (0–1)
     conciseness: float
-    # How distinct this point is from all previously emitted points (0–1)
     uniqueness: float
 
 
@@ -113,35 +118,35 @@ class TalkingPoint:
 # ---------------------------------------------------------------------------
 
 class TalkingPointsEngine:
-    """Generates concise, high-quality talking points from input text."""
+    """
+    Engine responsible for generating high-quality talking points from text.
+    """
 
     def __init__(self, config: Optional[TalkingPointsConfig] = None) -> None:
         """
         Initialise the engine with optional configuration.
 
-        :param config: TalkingPointsConfig instance; defaults to sensible
-                       production values if not provided
+        :param config: Configuration instance; defaults to production settings
         """
-        # Fall back to defaults if no config is supplied
+        # Load configuration or use defaults
         self.config = config or TalkingPointsConfig()
-        # Set up the logger first so model-load errors can be recorded
+        # Initialize logging for observability
         self.logger = self._setup_logger()
-        # Load (or mock-load) the NLP model
+        # Load the processing model (lexical or external)
         self.model = self._load_model(self.config.model_path)
 
     def _setup_logger(self) -> logging.Logger:
         """
         Configure and return a module-scoped logger.
 
-        If log_path is set in config, a RotatingFileHandler is attached;
-        otherwise logging falls through to the root handler (usually stdout).
-
-        :return: Configured logging.Logger instance
+        :return: Configured logging.Logger instance.
         """
+        # Create a logger specific to this engine component
         logger = logging.getLogger("afriflow.integration.talking_points_engine")
         logger.setLevel(self.config.log_level)
+
+        # Attach rotating file handler if a log path is configured
         if self.config.log_path:
-            # Use rotating handler to avoid unbounded log file growth
             handler = RotatingFileHandler(
                 self.config.log_path,
                 maxBytes=self.config.log_max_bytes,
@@ -151,7 +156,7 @@ class TalkingPointsEngine:
                 "%(asctime)s %(levelname)s %(name)s %(message)s"
             )
             handler.setFormatter(fmt)
-            # Guard against adding the same handler twice during hot-reload
+            # Ensure only one handler is attached to the logger
             if not any(isinstance(h, RotatingFileHandler) for h in logger.handlers):
                 logger.addHandler(handler)
         return logger
@@ -160,27 +165,24 @@ class TalkingPointsEngine:
         """
         Load the NLP model from disk, or return a lexical stub.
 
-        In this implementation the "model" is a simple lexical frequency
-        analyser. A future version can swap in a real embedding model by
-        pointing model_path at its artefact directory.
-
-        :param path: Filesystem path to the model artefact, or None
-        :return: A model descriptor dict
-        :raises ModelLoadError: If path is provided but does not exist
+        :param path: Path to the model artifact
+        :return: A model descriptor dictionary.
+        :raises ModelLoadError: If the model cannot be loaded.
         """
         start = time.time()
         try:
             if path:
-                # Validate the path before attempting to load
+                # Check for file existence before loading
                 if not os.path.exists(path):
                     raise FileNotFoundError(f"Model path not found: {path}")
-            # Return a lightweight descriptor; real models would be loaded here
+            # Stub for actual model loading logic
             return {"name": "lexical", "version": "1.0"}
         except Exception as e:
+            # Record failure in logs before raising custom exception
             self.logger.error("Model load failure: %s", e)
             raise ModelLoadError(str(e))
         finally:
-            # Always log load duration for performance monitoring
+            # Monitor load performance
             self.logger.debug("Model load took %.3fs", time.time() - start)
 
     def process(
@@ -189,15 +191,14 @@ class TalkingPointsEngine:
         output_format: Optional[str] = None,
     ) -> Union[Dict[str, Any], str]:
         """
-        Process input and generate formatted talking points.
+        Process input data and generate formatted talking points.
 
-        :param input_data: Raw input — a plain string, a dict with "text" or
-                           "texts" keys, a list of strings, or a file path
-                           ending in .json / .csv
-        :param output_format: Override config.output_format for this call only
-        :return: Formatted output (dict for "json", str for "markdown"/"text")
-        :raises EmptyInputError: If no usable text can be extracted
-        :raises ProcessingTimeoutError: If wall-clock time exceeds timeout_seconds
+        :param input_data: Raw text, list of texts, or path to JSON/CSV file
+        :param output_format: Optional override for the output format
+        :return: Formatted output (dict or string).
+        :raises EmptyInputError: If no text is available to process.
+        :raises ProcessingTimeoutError: If execution exceeds timeout.
+        """
         """
         start = time.time()
         # Honour artificial latency if configured (useful in benchmarking)

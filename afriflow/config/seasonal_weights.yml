@@ -1,73 +1,46 @@
-# Seasonal Weight Configuration
-# Adjustment weights for commodity-based signal detection
+# =============================================================================
+# @file seasonal_weights.yml
+# @description Weighting factors for seasonal and commodity-driven economic
+#              cycles across different African regions. Used by the signal
+#              detection engines to adjust probability scores based on the
+#              current calendar month and regional economic context.
+# @author Thabo Kunene
+# @created 2026-03-19
+# =============================================================================
 
-seasons:
-  cocoa:
-    GH:
-      - peak_months: [10, 11, 12]
-        trough_months: [3, 4, 5]
-        flow_type: export
-        expected_peak_multiplier: 3.0
-        expected_trough_multiplier: 0.2
-    CI:
-      - peak_months: [10, 11, 12, 1]
-        trough_months: [4, 5, 6]
-        flow_type: export
-        expected_peak_multiplier: 2.8
-        expected_trough_multiplier: 0.25
+# Seasonal Weights
+#
+# These multipliers are applied to signal confidence scores
+# based on the current calendar month.
+#
+# Disclaimer: Portfolio project by Thabo Kunene. Not a
+# Standard Bank Group product. All data is simulated.
 
-  coffee:
-    KE:
-      - peak_months: [4, 5, 6]
-        trough_months: [10, 11, 12]
-        flow_type: export
-        expected_peak_multiplier: 2.5
-        expected_trough_multiplier: 0.3
-    UG:
-      - peak_months: [3, 4, 5]
-        trough_months: [9, 10, 11]
-        flow_type: export
-        expected_peak_multiplier: 2.3
-        expected_trough_multiplier: 0.35
+# Multipliers for agriculture-driven economic signals.
+# Weights are higher during peak harvest months when
+# transaction volumes and FX demand are expected to spike.
+agriculture:
+  # Peak harvest in West Africa (NG, GH)
+  "NG": [1.0, 1.0, 1.1, 1.2, 1.3, 1.2, 1.1, 1.0, 1.0, 1.0, 1.1, 1.2]
+  # Peak harvest in East Africa (KE, TZ, UG)
+  "KE": [1.1, 1.2, 1.3, 1.2, 1.1, 1.0, 1.0, 1.0, 1.0, 1.1, 1.2, 1.1]
+  # Peak harvest in Southern Africa (ZA, ZM, MZ)
+  "ZA": [1.0, 1.0, 1.0, 1.1, 1.2, 1.3, 1.2, 1.1, 1.0, 1.0, 1.0, 1.0]
 
-  copper:
-    ZM:
-      - peak_months: [5, 6, 7, 8]
-        trough_months: [12, 1, 2]
-        flow_type: export
-        expected_peak_multiplier: 1.8
-        expected_trough_multiplier: 0.5
-    CD:
-      - peak_months: [4, 5, 6, 7]
-        trough_months: [11, 12, 1]
-        flow_type: export
-        expected_peak_multiplier: 1.6
-        expected_trough_multiplier: 0.55
+# Multipliers for retail-driven economic signals.
+# Weights reflect the year-end festive shopping surge
+# common across all sub-Saharan African markets.
+retail:
+  "ALL": [1.0, 0.9, 0.9, 1.0, 1.0, 1.1, 1.1, 1.0, 1.0, 1.1, 1.3, 1.5]
 
-  maize:
-    ZA:
-      - peak_months: [5, 6, 7]
-        trough_months: [11, 12, 1]
-        flow_type: domestic
-        expected_peak_multiplier: 2.0
-        expected_trough_multiplier: 0.4
-    ZM:
-      - peak_months: [4, 5, 6]
-        trough_months: [10, 11, 12]
-        flow_type: domestic
-        expected_peak_multiplier: 1.9
-        expected_trough_multiplier: 0.45
+# Multipliers for education-related payments.
+# Higher weights during school fee payment windows (Jan/Feb and Jul/Aug).
+education:
+  "ALL": [1.5, 1.4, 1.0, 1.0, 1.0, 1.1, 1.5, 1.4, 1.0, 1.0, 1.0, 1.0]
 
-  oil:
-    NG:
-      - peak_months: [6, 7, 8]
-        trough_months: [12, 1, 2]
-        flow_type: export
-        expected_peak_multiplier: 1.5
-        expected_trough_multiplier: 0.6
-    AO:
-      - peak_months: [5, 6, 7]
-        trough_months: [11, 12, 1]
-        flow_type: export
-        expected_peak_multiplier: 1.4
-        expected_trough_multiplier: 0.65
+# Multipliers for construction-related economic signals.
+# Higher weights during dry seasons when building activity
+# is most intense across the continent.
+construction:
+  "ZA": [1.1, 1.1, 1.1, 1.0, 0.9, 0.8, 0.8, 0.9, 1.1, 1.2, 1.2, 1.1]
+  "NG": [1.2, 1.3, 1.2, 1.1, 0.9, 0.8, 0.8, 0.9, 1.1, 1.2, 1.3, 1.2]

@@ -1,33 +1,56 @@
-# AfriFlow Default Configuration
-# Base defaults for all modules
+# =============================================================================
+# @file defaults.yml
+# @description Base default configuration for the AfriFlow platform. Defines
+#              global settings for application environment, logging, database
+#              connections, messaging infrastructure, and feature flags.
+# @author Thabo Kunene
+# @created 2026-03-19
+# =============================================================================
 
-# Application settings
+# AfriFlow Default Configuration
+# Base defaults for all modules in the AfriFlow ecosystem.
+#
+# Disclaimer: Portfolio project by Thabo Kunene. Not a
+# Standard Bank Group product. All data is simulated.
+
+# Top-level application metadata and environment settings.
 app:
   name: "AfriFlow"
   version: "2.0.0"
+  # One of: development, staging, production
   environment: "development"
 
-# Logging settings
+# Centralised logging configuration.
 logging:
+  # Minimum severity level to record (DEBUG, INFO, WARN, ERROR)
   level: "INFO"
+  # Whether to output logs in structured JSON format
   json_format: true
+  # Relative path for the persistent log file
   log_file: "logs/afriflow.log"
 
-# Database settings
+# Primary database connection settings (PostgreSQL).
 database:
   host: "localhost"
   port: 5432
   name: "afriflow"
+  # Number of concurrent connections allowed in the pool
   pool_size: 10
 
-# Kafka settings
+# Apache Kafka messaging backbone settings.
 kafka:
+  # Comma-separated list of broker host:port pairs
   bootstrap_servers: "localhost:9092"
+  # Unique identifier for the platform's consumer group
   consumer_group: "afriflow-consumer"
 
-# Feature flags
+# Global feature flags for enabling/disabling platform components.
 features:
+  # Enable the Lekgotla collaboration layer
   lekgotla_enabled: true
+  # Enable cross-border corridor intelligence
   corridor_enabled: true
+  # Enable RM alert outcome tracking and feedback loop
   outcome_tracking_enabled: true
+  # Toggle execution of heavy machine learning models
   ml_models_enabled: false

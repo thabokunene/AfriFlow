@@ -1,13 +1,13 @@
 """
 @file outcome_tracker.py
 @description Tracks alert outcomes to close the model feedback loop. Records
-             whether RM alerts and NBA recommendations led to revenue conversions,
-             were rejected, expired, or flagged as false positives. Generates
-             aggregate outcome reports and model calibration data that feeds back
-             into NBA weight tuning, churn predictor threshold adjustment, and
-             alert SLA optimisation.
+             whether RM alerts and NBA recommendations led to revenue
+             conversions, were rejected, expired, or flagged as false positives.
+             Generates aggregate outcome reports and model calibration data
+             that feeds back into NBA weight tuning, churn predictor threshold
+             adjustment, and alert SLA optimisation.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 # Outcome Tracker
@@ -39,11 +39,13 @@
 # Disclaimer: Portfolio project by Thabo Kunene. Not a
 # Standard Bank Group product. All data is simulated.
 
-from __future__ import annotations  # Enables forward references in annotations
+# Future import for forward references in type hints
+from __future__ import annotations
 
-from dataclasses import dataclass, field  # Structured data containers with auto-generated __init__
-from datetime import datetime             # Outcome timestamp; period boundary defaults
-from typing import Dict, List, Optional, Tuple  # Type annotations for clarity
+# Standard library imports for data classes, date/time logic, and typing
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +53,7 @@ from typing import Dict, List, Optional, Tuple  # Type annotations for clarity
 # ---------------------------------------------------------------------------
 
 # Allowed values for AlertOutcome.outcome.
-# Using a frozenset-like set for fast membership testing in record().
+# Using a set for fast membership testing in record().
 _OUTCOME_VALUES = {"CONVERTED", "REJECTED", "EXPIRED",
                    "FALSE_POSITIVE", "IN_PROGRESS"}
 
@@ -62,12 +64,13 @@ _OUTCOME_VALUES = {"CONVERTED", "REJECTED", "EXPIRED",
 
 @dataclass
 class AlertOutcome:
-    """Outcome record for a single alert.
+    """
+    Outcome record for a single alert. Tracks the final result of an RM action.
 
     :param alert_id: ID of the original alert this outcome refers to
     :param alert_type: Alert type e.g. CHURN_RISK, EXPANSION_OPTY, CLV_UPLIFT
     :param client_golden_id: Unified client ID from entity resolution
-    :param rm_id: ID of the RM who received and actioned (or did not action) the alert
+    :param rm_id: ID of the RM who received and actioned the alert
     :param outcome: One of CONVERTED / REJECTED / EXPIRED / FALSE_POSITIVE / IN_PROGRESS
     :param actual_revenue_zar: Actual revenue generated (0 if not converted)
     :param predicted_revenue_zar: Revenue the NBA model predicted at alert time
@@ -81,20 +84,22 @@ class AlertOutcome:
     alert_type: str
     client_golden_id: str
     rm_id: str
-    outcome: str                           # Must be in _OUTCOME_VALUES
-    actual_revenue_zar: float              # Actual deal revenue; 0 for non-conversions
-    predicted_revenue_zar: float           # Model prediction for comparison
-    nba_score_at_alert: Optional[float]    # NBA score at time of alert; None if not applicable
-    days_to_outcome: Optional[int]         # Lead time from alert to outcome; None if IN_PROGRESS
-    rm_notes: str                          # RM's qualitative explanation of the outcome
+    outcome: str
+    actual_revenue_zar: float
+    predicted_revenue_zar: float
+    nba_score_at_alert: Optional[float]
+    days_to_outcome: Optional[int]
+    rm_notes: str
+    # Automatically capture the creation time of the outcome record
     recorded_at: str = field(
-        default_factory=lambda: datetime.now().isoformat()  # Auto-stamped when outcome recorded
+        default_factory=lambda: datetime.now().isoformat()
     )
 
 
 @dataclass
 class ModelCalibrationPoint:
-    """A single data point for model calibration analysis.
+    """
+    A single data point for model calibration analysis.
 
     Maps a model's predicted score to the actual binary outcome, enabling
     calibration curve analysis (predicted probability vs actual frequency).
@@ -106,23 +111,24 @@ class ModelCalibrationPoint:
     :param revenue_zar: Actual revenue generated (for weighted calibration)
     """
 
-    model: str             # "nba", "churn", "clv", or "anomaly"
-    predicted_score: float  # Score at time of alert (0–100 scale)
-    actual_outcome: bool   # True = converted/churned, False = not
+    model: str
+    predicted_score: float
+    actual_outcome: bool
     alert_type: str
-    revenue_zar: float     # Revenue for revenue-weighted calibration curves
+    revenue_zar: float
 
 
 @dataclass
 class OutcomeReport:
-    """Aggregate outcome metrics for a time period.
+    """
+    Aggregate outcome metrics for a time period. Summarizes platform impact.
 
     :param period_start: ISO timestamp of the report period start
     :param period_end: ISO timestamp of the report period end
     :param total_alerts: Total number of outcome records in the period
     :param converted: Number of alerts with CONVERTED outcome
     :param rejected: Number of alerts with REJECTED outcome
-    :param expired: Number of alerts with EXPIRED outcome (RM did not act in time)
+    :param expired: Number of alerts with EXPIRED outcome
     :param false_positives: Number of alerts flagged FALSE_POSITIVE
     :param conversion_rate: Fraction of total alerts that converted
     :param false_positive_rate: Fraction of total alerts that were false positives
@@ -141,14 +147,14 @@ class OutcomeReport:
     expired: int
     false_positives: int
 
-    conversion_rate: float          # Overall conversion rate (0.0–1.0)
-    false_positive_rate: float      # Overall false positive rate (0.0–1.0)
-    avg_revenue_converted_zar: float  # Average revenue per successful conversion
-    total_revenue_zar: float        # Total revenue generated by converted alerts
+    conversion_rate: float
+    false_positive_rate: float
+    avg_revenue_converted_zar: float
+    total_revenue_zar: float
 
-    by_alert_type: Dict[str, Dict]   # {alert_type: {conversion_rate, count, revenue}}
-    by_rm: Dict[str, Dict]           # {rm_id: {conversion_rate, count}} sorted by rate desc
-    calibration_points: List[ModelCalibrationPoint]  # For calibration curve analysis
+    by_alert_type: Dict[str, Dict]
+    by_rm: Dict[str, Dict]
+    calibration_points: List[ModelCalibrationPoint]
 
 
 # ---------------------------------------------------------------------------
@@ -160,43 +166,15 @@ class OutcomeTracker:
     Track and analyse alert outcomes to calibrate models and rank RM performance.
 
     The OutcomeTracker is the feedback mechanism that makes AfriFlow a learning
-    system. Without it, alert models cannot improve over time. Key responsibilities:
-      - Validate outcome records before storage
-      - Aggregate outcomes into conversion rates, revenue metrics, and RM rankings
-      - Build model calibration data that reveals where models are over/underconfident
-
-    Usage::
-
-        tracker = OutcomeTracker()
-
-        # Record an outcome
-        tracker.record(AlertOutcome(
-            alert_id="ALERT-CHURN-GLD-001",
-            alert_type="CHURN_RISK",
-            client_golden_id="GLD-001",
-            rm_id="RM-00142",
-            outcome="CONVERTED",
-            actual_revenue_zar=450_000,
-            predicted_revenue_zar=520_000,
-            nba_score_at_alert=78.5,
-            days_to_outcome=12,
-            rm_notes="Client agreed to FX pricing review",
-        ))
-
-        # Generate report
-        report = tracker.generate_report(outcomes)
+    system. It provides the data needed for continuous model improvement.
     """
 
     def record(self, outcome: AlertOutcome) -> None:
         """
         Validate and store an outcome record.
 
-        Raises ValueError if the outcome value is not in the allowed set.
-        In production this method would persist to a data store; here it
-        validates the record to confirm the caller used a valid outcome type.
-
-        :param outcome: AlertOutcome to validate
-        :raises ValueError: If outcome.outcome is not in _OUTCOME_VALUES
+        :param outcome: AlertOutcome to validate and store
+        :raises ValueError: If the outcome type is not recognized.
         """
         # Enforce allowed outcome values to maintain data integrity in the tracking store
         if outcome.outcome not in _OUTCOME_VALUES:

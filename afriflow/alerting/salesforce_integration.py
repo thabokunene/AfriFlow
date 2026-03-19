@@ -1,14 +1,15 @@
 """
 @file salesforce_integration.py
 @description Builds and formats Salesforce CRM API payloads from AfriFlow alerts
-             and NBA recommendations. Converts RMAlert objects into Salesforce Tasks
-             (assigned to the RM, with SLA-derived due dates), NBA results into
-             Salesforce Opportunities (staged by propensity score), and outcome
-             updates into Task status closures. Designed as a stub that produces
-             production-correct API payload structures; in production these payloads
-             are sent via the Salesforce REST API with OAuth2 authentication.
+             and NBA recommendations. Converts RMAlert objects into Salesforce
+             Tasks (assigned to the RM, with SLA-derived due dates), NBA results
+             into Salesforce Opportunities (staged by propensity score), and
+             outcome updates into Task status closures. Designed as a stub that
+             produces production-correct API payload structures; in production
+             these payloads are sent via the Salesforce REST API with OAuth2
+             authentication.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 # Salesforce Integration
@@ -36,33 +37,33 @@
 # Disclaimer: Portfolio project by Thabo Kunene. Not a
 # Standard Bank Group product. All data is simulated.
 
-from __future__ import annotations  # PEP 563: enables forward references in type hints
+# Future import for forward references in type hints
+from __future__ import annotations
 
-from dataclasses import dataclass, field  # Lightweight structured data with auto-__init__
-from datetime import datetime, timedelta  # Timestamp generation and close-date projection
-from typing import Dict, List, Optional   # Type annotations for IDE support and clarity
+# Standard library imports for data classes, date/time logic, and typing
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
 # Salesforce standard field constant values
 # ---------------------------------------------------------------------------
 
-# Salesforce Task Status field values — used to mark tasks open vs closed
-_TASK_STATUS_OPEN = "Not Started"   # Default status when a new task is created
-_TASK_STATUS_DONE = "Completed"     # Set when outcome is CONVERTED, REJECTED, EXPIRED, or FALSE_POSITIVE
+# Salesforce Task Status field values.
+_TASK_STATUS_OPEN = "Not Started"
+_TASK_STATUS_DONE = "Completed"
 
-# Salesforce Task Priority field values
-_TASK_PRIORITY_HIGH   = "High"    # Assigned for IMMEDIATE and HIGH urgency alerts
-_TASK_PRIORITY_NORMAL = "Normal"  # Assigned for MEDIUM and LOW urgency alerts
+# Salesforce Task Priority field values.
+_TASK_PRIORITY_HIGH   = "High"
+_TASK_PRIORITY_NORMAL = "Normal"
 
 # NBA score → Salesforce Opportunity Stage mapping.
-# Ordered from highest to lowest threshold; the first matching entry is used.
-# This maps AfriFlow propensity scoring to Salesforce's standard pipeline stages.
 _NBA_SCORE_TO_STAGE: List[tuple] = [
-    (80, "Proposal/Price Quote"),  # Score >= 80: high confidence, ready for proposal
-    (60, "Needs Analysis"),        # Score >= 60: moderate confidence, needs discussion
-    (40, "Prospecting"),           # Score >= 40: early signal, initial outreach warranted
-    (0,  "Qualification"),         # Score < 40: below threshold; still tracked for pipeline visibility
+    (80, "Proposal/Price Quote"),
+    (60, "Needs Analysis"),
+    (40, "Prospecting"),
+    (0,  "Qualification"),
 ]
 
 
@@ -75,30 +76,28 @@ class SalesforceTask:
     """
     Salesforce Task payload matching the REST API field schema.
 
-    Maps directly to the Salesforce Task sobject. All fields correspond to
-    standard or custom Salesforce fields. Custom fields are prefixed __c.
+    Maps directly to the Salesforce Task sobject.
 
-    :param subject: Task title displayed in RM's Salesforce activity feed;
-                    prefixed [AfriFlow] to distinguish from manually created tasks
+    :param subject: Task title displayed in RM's Salesforce activity feed
     :param description: Full alert detail including talking point and CTA
-    :param owner_id: Salesforce User ID (18-char) of the assigned RM
-    :param what_id: Salesforce Account ID (18-char) of the client record
-    :param activity_date: Due date in YYYY-MM-DD; derived from alert SLA expiry
-    :param priority: Salesforce priority field value — High or Normal
-    :param status: Task status — Not Started (open) or Completed (closed)
-    :param type: Task type — Call, Email, Meeting, or Other
+    :param owner_id: Salesforce User ID of the assigned RM
+    :param what_id: Salesforce Account ID of the client record
+    :param activity_date: Due date in YYYY-MM-DD
+    :param priority: Salesforce priority field value (e.g., High)
+    :param status: Task status (e.g., Not Started)
+    :param type: Task type (e.g., Call)
     :param custom_fields: Dict of AfriFlow custom field API names to values
     """
 
     subject: str
     description: str
-    owner_id: str           # Salesforce User ID of the RM — links task to RM's queue
-    what_id: str            # Salesforce Account ID of the client — links to client record
-    activity_date: str      # Due date (YYYY-MM-DD) — drives Salesforce activity reminders
-    priority: str           # "High" or "Normal" — reflects alert urgency in SF UI
-    status: str             # "Not Started" or "Completed" — drives RM's task list view
-    type: str               # "Call", "Email", "Meeting", "Other" — used for activity reporting
-    custom_fields: Dict     # AfriFlow-specific custom fields for Salesforce reporting dashboards
+    owner_id: str
+    what_id: str
+    activity_date: str
+    priority: str
+    status: str
+    type: str
+    custom_fields: Dict
 
 
 @dataclass
@@ -106,28 +105,26 @@ class SalesforceOpportunity:
     """
     Salesforce Opportunity payload matching the REST API field schema.
 
-    Created for NBA results with a propensity score >= 40. Stage is derived
-    from the NBA score using _NBA_SCORE_TO_STAGE. Close date defaults to
-    90 days from generation — reflects a typical CIB deal cycle.
+    Created for NBA results with a propensity score >= 40.
 
-    :param name: Opportunity name with [AfriFlow] prefix and client + product
+    :param name: Opportunity name with [AfriFlow] prefix
     :param account_id: Salesforce Account ID of the client
     :param stage_name: Pipeline stage derived from NBA score
-    :param close_date: Expected close date (YYYY-MM-DD); defaults to 90 days out
+    :param close_date: Expected close date (YYYY-MM-DD)
     :param amount: Estimated deal revenue in ZAR from the NBA model
-    :param description: Full context including NBA score, talking point, and data quality
-    :param owner_id: Salesforce User ID of the owning RM; populated via rm_sf_id_map
-    :param custom_fields: AfriFlow NBA metadata for Salesforce custom report types
+    :param description: Full context including NBA score and talking point
+    :param owner_id: Salesforce User ID of the owning RM
+    :param custom_fields: AfriFlow NBA metadata for Salesforce reporting
     """
 
     name: str
     account_id: str
     stage_name: str
-    close_date: str         # Expected close date — 90-day default from NBA generation time
-    amount: float           # Estimated revenue ZAR from NBA model
+    close_date: str
+    amount: float
     description: str
-    owner_id: str           # Salesforce RM User ID; empty string if not yet mapped
-    custom_fields: Dict     # AfriFlow NBA custom fields for pipeline analytics
+    owner_id: str
+    custom_fields: Dict
 
 
 @dataclass
@@ -135,21 +132,18 @@ class SalesforceSyncBatch:
     """
     A batch of Salesforce records to upsert in a single API call.
 
-    Contains all Tasks (from RM alerts and outcome updates) and Opportunities
-    (from NBA results) generated in a single sync cycle. In production this
-    batch is passed to the Salesforce Bulk API or Composite REST API endpoint.
-
     :param tasks: List of SalesforceTask objects to upsert
     :param opportunities: List of SalesforceOpportunity objects to upsert
     :param batch_id: Unique batch identifier for audit and retry tracking
-    :param created_at: ISO timestamp when the batch was built
+    :param created_at: Timestamp when the batch was built
     """
 
     tasks: List[SalesforceTask]
     opportunities: List[SalesforceOpportunity]
-    batch_id: str                   # Unique per-sync identifier for logging and idempotency
+    batch_id: str
+    # Automatically capture the creation time of the sync batch
     created_at: str = field(
-        default_factory=lambda: datetime.now().isoformat()  # Auto-stamped at batch creation
+        default_factory=lambda: datetime.now().isoformat()
     )
 
 
@@ -161,30 +155,8 @@ class SalesforceIntegration:
     """
     Build Salesforce API payloads from AfriFlow alerts and NBA results.
 
-    Translates AfriFlow's internal alert and NBA data models into Salesforce
-    REST API-compatible payload structures. Handles three record types:
-      1. RM alerts  → Tasks assigned to the RM, due by the alert SLA expiry
-      2. NBA results → Opportunities on the client Account, staged by score
-      3. Outcomes   → Task status updates to close completed actions
-
-    The class is initialised with ID mapping dicts that translate AfriFlow's
-    internal IDs (RM-XXXXX, GLD-XXX) to Salesforce 18-character record IDs.
-    If a mapping is missing, the AfriFlow ID is used as a fallback.
-
-    Intended recipients of the synced records: relationship managers in their
-    Salesforce activity feed and pipeline view.
-
-    Usage::
-
-        sf = SalesforceIntegration(
-            rm_sf_id_map={"RM-00142": "0051X000003TukS"},
-            client_sf_id_map={"GLD-001": "0011X000002FSmT"},
-        )
-        batch = sf.build_sync_batch(
-            rm_alerts=[...],
-            nba_results=[...],
-        )
-        # In production: post batch.tasks and batch.opportunities to SF API
+    Translates AfriFlow's internal data models into Salesforce REST API
+    compatible structures for seamless CRM integration.
     """
 
     def __init__(
@@ -195,9 +167,104 @@ class SalesforceIntegration:
         """
         Initialise the integration with ID mapping dictionaries.
 
-        :param rm_sf_id_map: Dict mapping AfriFlow RM IDs to Salesforce User IDs
-                             e.g. {"RM-00142": "0051X000003TukS"}
-        :param client_sf_id_map: Dict mapping client golden IDs to Salesforce Account IDs
+        :param rm_sf_id_map: Maps AfriFlow RM IDs to Salesforce User IDs
+        :param client_sf_id_map: Maps client golden IDs to Salesforce Account IDs
+        """
+        # Dictionary for translating RM internal IDs to Salesforce identifiers
+        self.rm_sf_id_map = rm_sf_id_map or {}
+        # Dictionary for translating client golden IDs to Salesforce identifiers
+        self.client_sf_id_map = client_sf_id_map or {}
+
+    def build_sync_batch(
+        self,
+        batch_id: str,
+        rm_alerts: List[RMAlert],
+        nba_results: List[Dict],
+        outcomes: Optional[List[AlertOutcome]] = None,
+    ) -> SalesforceSyncBatch:
+        """
+        Build a comprehensive sync batch containing Tasks and Opportunities.
+
+        :param batch_id: Unique identifier for the current sync run
+        :param rm_alerts: List of active RMAlert objects to sync as Tasks
+        :param nba_results: List of NBA result dictionaries to sync as Opportunities
+        :param outcomes: Optional list of AlertOutcome objects to sync as Task closures
+        :return: A SalesforceSyncBatch containing all generated record payloads.
+        """
+        tasks: List[SalesforceTask] = []
+        opportunities: List[SalesforceOpportunity] = []
+
+        # Convert active RM alerts into Salesforce Tasks assigned to the RM
+        for alert in rm_alerts:
+            tasks.append(self._build_task_from_alert(alert))
+
+        # Convert NBA recommendations into Salesforce Opportunities if score threshold is met
+        for nba in nba_results:
+            opp = self._build_opportunity_from_nba(nba)
+            if opp:
+                opportunities.append(opp)
+
+        # Process alert outcomes to close existing Salesforce Tasks
+        for outcome in (outcomes or []):
+            tasks.append(self._build_task_closure(outcome))
+
+        return SalesforceSyncBatch(
+            tasks=tasks,
+            opportunities=opportunities,
+            batch_id=batch_id,
+        )
+
+    def _build_task_from_alert(self, alert: RMAlert) -> SalesforceTask:
+        """
+        Map an RMAlert object to a SalesforceTask REST API payload.
+
+        :param alert: The source RMAlert object
+        :return: A populated SalesforceTask payload.
+        """
+        # Extract Salesforce-specific IDs using the mapping dictionaries
+        rm_sf_id = self.rm_sf_id_map.get(alert.rm_id, alert.rm_id)
+        client_sf_id = self.client_sf_id_map.get(
+            alert.client_golden_id, alert.client_golden_id
+        )
+
+        # Derive Salesforce priority from AfriFlow urgency multiplier
+        priority = _TASK_PRIORITY_NORMAL
+        if alert.alert_type in ["FRAUD_FLAG", "CHURN_RISK", "CURRENCY_RISK"]:
+            priority = _TASK_PRIORITY_HIGH
+
+        # Calculate the due date (activity_date) from the SLA expiry timestamp
+        try:
+            # Parse the ISO timestamp and format as YYYY-MM-DD
+            expiry_dt = datetime.fromisoformat(alert.sla_expires_at)
+            activity_date = expiry_dt.strftime("%Y-%m-%d")
+        except (ValueError, TypeError):
+            # Fallback to 48 hours from now if the timestamp is invalid
+            activity_date = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
+
+        # Compile the full task description for the RM's preparação
+        description = (
+            f"{alert.talking_point}\n\n"
+            f"Call to Action: {alert.call_to_action}\n\n"
+            f"Evidence:\n- " + "\n- ".join(alert.supporting_evidence)
+        )
+
+        return SalesforceTask(
+            subject=f"[AfriFlow] {alert.alert_type.replace('_', ' ').title()}",
+            description=description,
+            owner_id=rm_sf_id,
+            what_id=client_sf_id,
+            activity_date=activity_date,
+            priority=priority,
+            status=_TASK_STATUS_OPEN,
+            type="Call",
+            # Attach AfriFlow-specific metadata for CRM reporting
+            custom_fields={
+                "AfriFlow_Alert_ID__c": alert.alert_id,
+                "AfriFlow_Priority_Score__c": alert.priority_score,
+                "AfriFlow_Revenue_At_Stake__c": alert.revenue_at_stake_zar,
+                "AfriFlow_Domains__c": ";".join(alert.domains_triggered),
+            },
+        )
                                   e.g. {"GLD-001": "0011X000002FSmT"}
         """
         self._rm_ids = rm_sf_id_map or {}        # AfriFlow RM ID → Salesforce User ID

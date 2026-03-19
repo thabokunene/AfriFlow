@@ -1,33 +1,53 @@
-# Moderation Patterns Configuration
-# Content filtering and review settings
+# =============================================================================
+# @file moderation_patterns.yml
+# @description Regular expression patterns and keyword lists used by the
+#              Lekgotla moderation engine to automatically flag sensitive,
+#              non-compliant, or unprofessional content in collaboration threads.
+# @author Thabo Kunene
+# @created 2026-03-19
+# =============================================================================
 
-patterns:
-  confidential:
-    - "client\\s*(name|number|id)\\s*[:\\s]*\\w+"
-    - "account\\s*(number|id)\\s*[:\\s]*\\d+"
-    - "password|credential|secret"
-    - "internal\\s*(memo|document|report)"
-    - "confidential|proprietary"
+# Moderation Patterns
+# Configuration for the Lekgotla automated content moderation system.
+#
+# Disclaimer: Portfolio project by Thabo Kunene. Not a
+# Standard Bank Group product. All data is simulated.
 
-  spam:
-    - "http[s]?://\\S+"
-    - "\\b(CALL|CONTACT|CLICK)\\s+(NOW|TODAY)\\b"
-    - "\\b(FREE|WIN|PRIZE)\\b"
-    - "\\b(URGENT|ACT NOW)\\b"
+# Patterns that indicate potential leaks of internal-only bank identifiers
+# or sensitive regulatory codes that should not be discussed in open threads.
+internal_ids:
+  # Matches common internal project code formats
+  - "PRJ-[0-9]{5}"
+  # Matches internal cost centre codes
+  - "CC-[0-9]{4}"
+  # Matches employee global identifiers
+  - "EMP-[A-Z]{3}-[0-9]{4}"
 
-  inappropriate:
-    - "\\b(profanity_placeholder)\\b"
+# Patterns for identifying client-specific sensitive data such as
+# account numbers, card numbers, or government identifiers.
+pii_patterns:
+  # Standard 16-digit card number pattern (basic check)
+  - "[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{4}"
+  # South African ID number pattern (13 digits)
+  - "[0-9]{13}"
+  # Generic account number pattern (10-12 digits)
+  - "[0-9]{10,12}"
 
-auto_flag:
-  enabled: true
-  threshold_score: 0.7
-  notify_moderators: true
+# Keywords that trigger an automatic "unprofessional" flag.
+# These words are excluded from all peer-to-peer discussions.
+blocked_keywords:
+  - "confidential"  # Redundant but often misused
+  - "internal_only"
+  - "top_secret"
+  - "leaked"
+  - "unverified"
 
-review:
-  require_before_publish: false
-  require_for_new_users: true
-  new_user_days: 30
-
-escalation:
-  auto_escalate_after_hours: 24
-  escalate_to_role: "compliance_officer"
+# Patterns that suggest the user is posting a regulatory alert.
+# These are automatically prioritised for compliance officer review.
+regulatory_keywords:
+  - "SAR"           # Suspicious Activity Report
+  - "AML"           # Anti-Money Laundering
+  - "KYC"           # Know Your Customer
+  - "POPIA"         # Protection of Personal Information Act
+  - "GDPR"          # General Data Protection Regulation
+  - "SANCTION"      # Sanctions list matches

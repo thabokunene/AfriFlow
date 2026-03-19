@@ -1,29 +1,62 @@
-# Corridor Configuration
-# Cross-border intelligence settings
+# =============================================================================
+# @file corridor_config.yml
+# @description Configuration for cross-border corridor intelligence, including
+#              leakage detection thresholds, revenue attribution windows, and
+#              priority trading corridors across Africa.
+# @author Thabo Kunene
+# @created 2026-03-19
+# =============================================================================
 
+# Corridor Configuration
+# Cross-border intelligence settings for the AfriFlow platform.
+#
+# Disclaimer: Portfolio project by Thabo Kunene. Not a
+# Standard Bank Group product. All data is simulated.
+
+# Leakage detection settings identify when a client is using a competitor
+# for their cross-border payment or FX needs within a specific corridor.
 leakage_detection:
+  # Minimum % divergence from expected capture to trigger an alert
   threshold: 0.10
+  # Only flag leakage for clients with at least this amount of annual volume
   min_volume_zar: 100000
+  # Minimum probability score required from the leakage model to emit a signal
   confidence_threshold: 0.75
 
+# Capture expectations define what percentage of a client's business
+# Standard Bank expects to capture in an ideal relationship.
 capture_expectations:
+  # Target capture for FX hedging and cross-border payments
   fx_pct: 0.60
+  # Target capture for commercial insurance products
   insurance_pct: 0.30
+  # Target capture for workforce salary payments
   payroll_pct: 0.40
 
+# Informal detection identifies clients using mobile money or informal
+# channels for business-to-business payments instead of formal CIB products.
 informal_detection:
+  # Ratio of MoMo volume to CIB volume that triggers an investigation
   momo_cib_ratio_threshold: 1.0
+  # Minimum MoMo volume required to trigger an informal detection signal
   min_momo_volume_zar: 50000
+  # Enable/disable automatic alerting for high MoMo-to-CIB ratios
   alert_on_high_ratio: true
 
+# Revenue attribution settings define how AfriFlow credits revenue
+# to specific domains when a cross-domain signal leads to a deal.
 revenue_attribution:
+  # Number of days after a signal fires that a deal is attributed to it
   window_days: 90
+  # Domains included in the attribution calculation
   domains: ["CIB", "FOREX", "INSURANCE", "CELL", "PBB"]
 
+# Priority corridors for focused signal monitoring and reporting.
+# Format: "Origin Country > Destination Country" (ISO-2 codes).
 priority_corridors:
-  - "ZA > NG"
-  - "ZA > KE"
-  - "ZA > GH"
-  - "ZA > TZ"
-  - "ZA > ZM"
-  - "ZA > MZ"
+  - "ZA > NG"  # South Africa to Nigeria
+  - "ZA > KE"  # South Africa to Kenya
+  - "ZA > GH"  # South Africa to Ghana
+  - "ZA > TZ"  # South Africa to Tanzania
+  - "ZA > ZM"  # South Africa to Zambia
+  - "ZA > MZ"  # South Africa to Mozambique

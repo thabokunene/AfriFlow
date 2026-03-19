@@ -1,15 +1,38 @@
-# Lekgotla Configuration
-# Collective intelligence platform settings
+# =============================================================================
+# @file lekgotla_config.yml
+# @description Configuration for the Lekgotla collective intelligence platform,
+#              defining gamification points, user levels, graduation rules,
+#              and moderation settings for cross-domain collaboration.
+# @author Thabo Kunene
+# @created 2026-03-19
+# =============================================================================
 
+# Lekgotla Configuration
+# Collective intelligence platform settings for the AfriFlow collaboration layer.
+#
+# Disclaimer: Portfolio project by Thabo Kunene. Not a
+# Standard Bank Group product. All data is simulated.
+
+# Point rewards for different types of platform engagement.
+# These points drive the gamification levels and leaderboard rankings.
 points:
+  # Creating a new intelligence thread for a client or market
   thread_created: 10
+  # Replying to an existing thread or signal discussion
   reply_posted: 5
+  # Having a reply marked as the solution to a client problem
   solution_marked: 25
+  # Submitting a raw knowledge card (e.g., market insight)
   card_contributed: 50
+  # Having a knowledge card peer-reviewed and published
   card_published: 100
+  # Receiving an upvote on a post or card from a peer
   upvote_received: 2
+  # Posting a regulatory update or compliance alert
   regulatory_post: 30
 
+# User levels based on cumulative point thresholds.
+# Levels are displayed on RM profiles to indicate domain expertise.
 levels:
   - threshold: 0
     name: "newcomer"
@@ -24,18 +47,32 @@ levels:
   - threshold: 15000
     name: "legend"
 
+# Graduation rules define when a thread or card transitions from "draft"
+# to "verified intelligence" that can be cited in official RM briefings.
 graduation:
+  # Minimum upvotes required to graduate a card
   min_upvotes: 10
+  # Minimum number of distinct RMs who must contribute to a thread
   min_contributors: 3
+  # Minimum number of days a thread must be active before graduation
   min_days_active: 7
+  # Whether a thread must have a marked solution to graduate
   require_solution: true
 
+# Notification settings for the Lekgotla real-time alerting system.
 notification:
+  # Maximum number of notifications to batch in a single push
   batch_size: 100
+  # Seconds to wait before pushing a notification (enables batching)
   delay_seconds: 300
+  # Daily cap on notifications per user to prevent alert fatigue
   max_per_user_per_day: 50
 
+# Content moderation settings for the collaboration platform.
 moderation:
+  # Enable automatic flagging of sensitive content via regex/patterns
   auto_flag_enabled: true
+  # New users' posts must be reviewed by a moderator before going live
   require_review_for_new_users: true
+  # Number of days a user is considered "new" for moderation purposes
   new_user_threshold_days: 30

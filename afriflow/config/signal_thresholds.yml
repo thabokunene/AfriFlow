@@ -1,34 +1,48 @@
-# Signal Detection Thresholds
-# Minimum evidence required to trigger signals
+# =============================================================================
+# @file signal_thresholds.yml
+# @description Global thresholds for the cross-domain signal detection pipeline.
+#              Defines minimum requirements for CIB payment volume, SIM card
+#              activations, and confidence scores before a signal is emitted.
+# @author Thabo Kunene
+# @created 2026-03-19
+# =============================================================================
 
+# Signal Thresholds
+#
+# These thresholds determine when evidence from different domains
+# is strong enough to generate an RM-facing signal.
+#
+# Disclaimer: Portfolio project by Thabo Kunene. Not a
+# Standard Bank Group product. All data is simulated.
+
+# Expansion signals identify clients moving into new African markets.
 expansion:
+  # Minimum number of distinct CIB payments to the target country
   min_cib_payments: 3
+  # Minimum aggregate ZAR value of payments to the target country
   min_cib_value_zar: 1000000
+  # Minimum number of MTN SIM card activations in the target country
   min_sim_activations: 20
-  min_forex_trades: 2
-  min_pbb_accounts: 5
+  # Overall confidence threshold (0-1) for the expansion model
+  min_confidence: 0.80
 
-leakage:
-  min_volume_ratio: 0.10
-  min_transaction_count: 10
-  confidence_threshold: 0.70
+# Churn signals identify clients likely to leave the bank or domain.
+churn:
+  # Probability threshold above which a client is flagged as "At Risk"
+  min_probability: 0.70
+  # Number of days of transaction inactivity that triggers a warning
+  inactivity_days: 45
 
+# Hedge gap signals identify unhedged FX exposures in active corridors.
 hedge_gap:
+  # Minimum unhedged exposure in ZAR before an alert is generated
   min_exposure_zar: 500000
-  days_without_hedge: 30
-  confidence_threshold: 0.75
+  # Volatility threshold (%) that prioritises the hedge gap alert
+  volatility_threshold: 0.15
 
+# Workforce signals estimate client headcount via MTN SIM data.
 workforce:
+  # Minimum number of SIMs associated with a client before estimation
   min_sims: 50
-  min_activity_days: 14
-  confidence_threshold: 0.65
-
-insurance_gap:
-  min_cib_volume_zar: 1000000
-  days_without_coverage: 60
-  confidence_threshold: 0.70
-
-currency_cascade:
-  min_devaluation_pct: 5.0
-  min_exposure_zar: 1000000
-  confidence_threshold: 0.80
+  # Confidence threshold for the SIM-to-employee deflation model
+  min_confidence: 0.75

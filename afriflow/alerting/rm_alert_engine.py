@@ -8,7 +8,7 @@
              (urgency multiplier × revenue at stake) so RMs always see their
              most valuable action first.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 # Relationship Manager Alert Engine
@@ -38,42 +38,39 @@
 # Disclaimer: Portfolio project by Thabo Kunene. Not a
 # Standard Bank Group product. All data is simulated.
 
-from __future__ import annotations  # PEP 563: postponed annotation evaluation
+# Future import for forward references in type hints
+from __future__ import annotations
 
-from dataclasses import dataclass, field  # Structured data containers with auto-__init__
-from datetime import datetime, timedelta  # Alert creation timestamps and SLA expiry calculation
-from typing import Dict, List, Optional   # Type annotations for IDE support and clarity
+# Standard library imports for data classes, date/time logic, and typing
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
 # Alert type configuration registries
 # ---------------------------------------------------------------------------
 
-# SLA hours by alert type: how long the opportunity remains valid before it goes stale.
-# These values reflect the business tempo of each signal type:
-#   FRAUD_FLAG is critical and must be escalated within 4 hours.
-#   CLV_UPLIFT is a strategic signal valid for up to 2 weeks.
+# SLA hours by alert type: how long the opportunity remains valid.
 _ALERT_SLA_HOURS: Dict[str, int] = {
-    "CHURN_RISK":      48,   # 48h: churn signals are urgent but can wait overnight
-    "EXPANSION_OPTY":  168,  # 168h (1 week): expansion is strategic; client may be mid-deal
-    "CURRENCY_RISK":   24,   # 24h: rate moves are time-sensitive; next business day maximum
-    "PAYROLL_DELAY":   72,   # 72h: payroll situations evolve quickly; 3 days to act
-    "FRAUD_FLAG":      4,    # 4h: compliance escalation required same day; do not delay
-    "CLV_UPLIFT":      336,  # 336h (2 weeks): CLV revision is strategic, not urgent
-    "RENEWAL_DUE":     720,  # 720h (30 days): renewal conversations have a long runway
+    "CHURN_RISK":      48,   # 48h: churn signals are urgent
+    "EXPANSION_OPTY":  168,  # 1 week: expansion is strategic
+    "CURRENCY_RISK":   24,   # 24h: rate moves are time-sensitive
+    "PAYROLL_DELAY":   72,   # 3 days: payroll situations evolve quickly
+    "FRAUD_FLAG":      4,    # 4h: compliance escalation required same day
+    "CLV_UPLIFT":      336,  # 2 weeks: CLV revision is strategic
+    "RENEWAL_DUE":     720,  # 30 days: renewal conversations have a long runway
 }
 
-# Urgency multiplier by alert type: weights the revenue at stake for priority scoring.
-# Higher multiplier = alert appears earlier in the RM's action queue regardless of revenue size.
-# FRAUD_FLAG has the highest multiplier (10×) because compliance risk is non-negotiable.
+# Urgency multiplier by alert type: weights the revenue at stake.
 _URGENCY_MULTIPLIER: Dict[str, float] = {
-    "FRAUD_FLAG":      10.0,  # Compliance-critical; must surface regardless of revenue size
-    "CHURN_RISK":       5.0,  # High urgency: revenue at risk if RM does not act quickly
-    "CURRENCY_RISK":    4.0,  # Time-sensitive: rates move; hedging window closes
-    "PAYROLL_DELAY":    3.0,  # Operational distress signal; client may need emergency facility
-    "EXPANSION_OPTY":   2.0,  # Strategic opportunity; high value but not urgent
-    "RENEWAL_DUE":      1.5,  # Renewal has a long runway; lower multiplier
-    "CLV_UPLIFT":       1.2,  # Informational uplift; lowest urgency multiplier
+    "FRAUD_FLAG":      10.0,  # Compliance-critical
+    "CHURN_RISK":       5.0,  # High urgency
+    "CURRENCY_RISK":    4.0,  # Time-sensitive
+    "PAYROLL_DELAY":    3.0,  # Operational distress signal
+    "EXPANSION_OPTY":   2.0,  # Strategic opportunity
+    "RENEWAL_DUE":      1.5,  # Renewal runway
+    "CLV_UPLIFT":       1.2,  # Informational uplift
 }
 
 
@@ -84,27 +81,23 @@ _URGENCY_MULTIPLIER: Dict[str, float] = {
 @dataclass
 class RMAlert:
     """
-    A single alert for a relationship manager.
+    A single alert for a relationship manager representing a risk or opportunity.
 
-    priority_score: computed as (revenue_at_stake × urgency_multiplier) / 1_000_000,
-                    capped at 100 for display purposes. Higher = show first in queue.
-
-    :param alert_id: Unique ID with prefix ALERT-<TYPE>-<GOLDEN_ID>[-<PAIR>]
+    :param alert_id: Unique identifier for the alert
     :param rm_id: ID of the relationship manager who owns this client
     :param client_golden_id: Unified client ID from entity resolution
-    :param client_name: Human-readable client name for the RM's dashboard
-    :param alert_type: CHURN_RISK / EXPANSION_OPTY / CURRENCY_RISK / PAYROLL_DELAY /
-                       FRAUD_FLAG / CLV_UPLIFT / RENEWAL_DUE
+    :param client_name: Display name of the client
+    :param alert_type: Category of RM alert (e.g., CHURN_RISK)
     :param priority_score: Computed priority 0–100; higher = more important
     :param revenue_at_stake_zar: ZAR revenue at risk or opportunity value
-    :param sla_expires_at: ISO timestamp; alert is stale after this time
-    :param talking_point: Pre-drafted opening for the RM's client conversation
-    :param supporting_evidence: List of evidence bullets (domain signals that fired)
+    :param sla_expires_at: Timestamp after which the alert is considered stale
+    :param talking_point: Pre-drafted conversation opener for the RM
+    :param supporting_evidence: List of domain signals that fired
     :param call_to_action: Specific recommended next step for the RM
-    :param domains_triggered: List of AfriFlow domains that contributed to this alert
-    :param created_at: ISO timestamp of alert creation
-    :param acknowledged: True if the RM has seen the alert
-    :param actioned: True if the RM has logged an action against the alert
+    :param domains_triggered: List of AfriFlow domains that contributed
+    :param created_at: Timestamp of alert creation
+    :param acknowledged: True if the RM has viewed the alert
+    :param actioned: True if the RM has logged an action
     """
 
     alert_id: str
@@ -112,40 +105,48 @@ class RMAlert:
     client_golden_id: str
     client_name: str
     alert_type: str
-    priority_score: float          # 0–100; drives sort order in RM dashboard
-    revenue_at_stake_zar: float    # Revenue at risk (churn) or opportunity (expansion)
-    sla_expires_at: str            # ISO datetime; after this the alert is considered stale
-    talking_point: str             # Pre-drafted conversation opener for the RM
-    supporting_evidence: List[str] # Bullet points of the cross-domain evidence
-    call_to_action: str            # Specific recommended action for the RM
-    domains_triggered: List[str]   # Which AfriFlow domains fired to generate this alert
+    priority_score: float
+    revenue_at_stake_zar: float
+    sla_expires_at: str
+    talking_point: str
+    supporting_evidence: List[str]
+    call_to_action: str
+    domains_triggered: List[str]
+    # Automatically capture the creation time of the alert
     created_at: str = field(
-        default_factory=lambda: datetime.now().isoformat()  # Auto-stamped at creation
+        default_factory=lambda: datetime.now().isoformat()
     )
-    acknowledged: bool = False  # True = RM has opened/viewed the alert
-    actioned: bool = False      # True = RM has logged a follow-up action
+    acknowledged: bool = False
+    actioned: bool = False
 
 
 @dataclass
 class RMAlertBatch:
-    """All pending alerts for a single RM, ranked by priority score descending.
+    """
+    A collection of RM alerts for a single manager's portfolio.
 
     :param rm_id: ID of the relationship manager this batch belongs to
-    :param alerts: Priority-sorted list of RMAlert objects (highest score first)
-    :param total_revenue_at_stake_zar: Sum of revenue_at_stake_zar across all alerts
-    :param generated_at: ISO timestamp when the batch was built
+    :param alerts: Priority-sorted list of RMAlert objects
+    :param total_revenue_at_stake_zar: Aggregate revenue at stake across the batch
+    :param generated_at: When the batch was compiled
     """
 
     rm_id: str
     alerts: List[RMAlert]
-    total_revenue_at_stake_zar: float   # KPI: total revenue in this RM's action queue
+    # Sum of revenue at stake for all alerts in the batch
+    total_revenue_at_stake_zar: float
+    # Timestamp marking the completion of batch generation
     generated_at: str = field(
         default_factory=lambda: datetime.now().isoformat()
     )
 
     @property
     def top_alert(self) -> Optional[RMAlert]:
-        """Return the highest-priority alert in the batch, or None if empty."""
+        """
+        Returns the highest-priority alert in the batch.
+
+        :return: The first RMAlert in the sorted list, or None if empty.
+        """
         return self.alerts[0] if self.alerts else None
 
 
@@ -155,32 +156,8 @@ class RMAlertBatch:
 
 class RMAlertEngine:
     """
-    Generate and rank alerts for relationship managers.
-
-    Consumes NBA results, churn predictions, anomaly detections, and currency
-    events to produce a prioritised RM action queue. Each client's signals are
-    processed through type-specific alert builders that format pre-drafted
-    talking points, evidence bullets, and call-to-actions.
-
-    Intended recipient: relationship managers (commercial and CIB).
-
-    Usage::
-
-        engine = RMAlertEngine()
-        batch = engine.build_alert_batch(
-            rm_id="RM-00142",
-            client_signals=[
-                {
-                    "golden_id": "GLD-001",
-                    "client_name": "Acme Logistics Ltd",
-                    "churn_prediction": {...},
-                    "nba_result": {...},
-                    "anomalies": [...],
-                    "currency_events": [...],
-                    "payroll_signals": [...],
-                }
-            ],
-        )
+    Engine responsible for identifying relationship manager risks and
+    opportunities by correlating cross-domain signals and calculating priority.
     """
 
     def build_alert_batch(
@@ -189,15 +166,11 @@ class RMAlertEngine:
         client_signals: List[Dict],
     ) -> RMAlertBatch:
         """
-        Build a ranked alert batch for one RM across all of their clients.
+        Scan an RM's entire portfolio and generate a prioritized alert batch.
 
-        Iterates over every client signal record, generates applicable alerts
-        per client, and sorts the combined list by priority score descending
-        so the RM's most important action is always at the top.
-
-        :param rm_id: Relationship manager identifier
+        :param rm_id: Unique ID of the target relationship manager
         :param client_signals: List of client signal dicts from the pipeline
-        :return: RMAlertBatch sorted by priority_score descending
+        :return: An RMAlertBatch sorted by priority_score descending.
         """
         all_alerts: List[RMAlert] = []
 
@@ -206,10 +179,10 @@ class RMAlertEngine:
             alerts = self._process_client(rm_id, cs)
             all_alerts.extend(alerts)
 
-        # Sort by priority score descending: highest-value/urgency actions appear first
+        # Sort by priority score descending (highest first) for RM productivity
         all_alerts.sort(key=lambda a: a.priority_score, reverse=True)
 
-        # KPI: total revenue represented in this RM's alert queue
+        # Calculate the total revenue at stake for the RM's action queue
         total_revenue = sum(
             a.revenue_at_stake_zar for a in all_alerts
         )
@@ -226,13 +199,9 @@ class RMAlertEngine:
         """
         Process all signal types for a single client and return relevant alerts.
 
-        Each signal type is evaluated independently; multiple alert types can
-        fire for the same client in the same batch (e.g. churn + currency risk).
-
         :param rm_id: Relationship manager identifier
-        :param cs: Client signal dict with golden_id, client_name, churn_prediction,
-                   nba_result, currency_events, payroll_signals, anomalies
-        :return: List of RMAlert objects for this client (may be empty)
+        :param cs: Combined signal data dictionary for the client
+        :return: List of generated RMAlert objects.
         """
         alerts: List[RMAlert] = []
         golden_id = cs.get("golden_id", "UNKNOWN")
@@ -240,7 +209,6 @@ class RMAlertEngine:
 
         # --- Signal type 1: Churn risk ---
         # Triggers when the churn model assigns the client a RED or CRITICAL band.
-        # RED = elevated churn probability; CRITICAL = imminent attrition.
         churn = cs.get("churn_prediction")
         if churn and churn.get("churn_band") in ("RED", "CRITICAL"):
             alerts.append(self._build_churn_alert(
@@ -248,8 +216,7 @@ class RMAlertEngine:
             ))
 
         # --- Signal type 2: NBA expansion opportunity ---
-        # Triggers when the NBA engine's top action is a SELL recommendation
-        # with a score ≥ 60 (i.e. moderate-to-high propensity to buy).
+        # Triggers when the NBA engine's top action is a SELL recommendation.
         nba = cs.get("nba_result")
         if nba and nba.get("top_action"):
             action = nba["top_action"]
@@ -260,7 +227,6 @@ class RMAlertEngine:
 
         # --- Signal type 3: Currency risk events ---
         # Triggers for each HIGH or CRITICAL severity currency event affecting the client.
-        # One alert per event (multiple pairs can fire for the same client).
         for event in cs.get("currency_events", []):
             if event.get("severity") in ("HIGH", "CRITICAL"):
                 alerts.append(self._build_currency_alert(
@@ -269,7 +235,6 @@ class RMAlertEngine:
 
         # --- Signal type 4: Payroll delay ---
         # Triggers when a corporate client's payroll is 3 or more days late.
-        # This signals potential liquidity stress or operational disruption.
         for ps in cs.get("payroll_signals", []):
             if ps.get("days_late", 0) >= 3:
                 alerts.append(self._build_payroll_alert(
@@ -278,7 +243,6 @@ class RMAlertEngine:
 
         # --- Signal type 5: Fraud flags ---
         # Triggers for anomalies flagged as requiring a Suspicious Activity Report (SAR).
-        # SAR-required anomalies have the highest urgency multiplier (10×).
         for anomaly in cs.get("anomalies", []):
             if anomaly.get("requires_sar", False):
                 alerts.append(self._build_fraud_alert(

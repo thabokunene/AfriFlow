@@ -3,37 +3,37 @@
 @description Core assembly logic for pre-meeting client intelligence briefings.
              Combines unified golden-record data, cross-domain signals, data
              shadow gaps, seasonal context, and currency event impacts into a
-             single structured ClientBriefing artifact.  Also integrates with
+             single structured ClientBriefing artifact. Also integrates with
              the optional TalkingPointsEngine to enhance RM conversation starters.
 @author Thabo Kunene
-@created 2026-03-17
+@created 2026-03-19
 """
 
-"""
-Client Briefing Generator
+# Client Briefing Generator
+#
+# We generate a structured 2-minute briefing card for
+# Relationship Managers before every client meeting.
+# This pulls from the unified golden record, cross-domain
+# signals, data shadow gaps, seasonal context, and
+# currency event impact.
+#
+# Disclaimer: Portfolio project by Thabo Kunene. Not a
+# Standard Bank Group product. All data is simulated.
 
-We generate a structured 2-minute briefing card for
-Relationship Managers before every client meeting.
-This pulls from the unified golden record, cross-domain
-signals, data shadow gaps, seasonal context, and
-currency event impact.
+# Future import for forward references in type hints
+from __future__ import annotations
 
-This is the feature that makes an ExCo member say
-"I want this for every client meeting starting Monday."
-
-DISCLAIMER: This project is not a sanctioned initiative
-of Standard Bank Group, MTN, or any affiliated entity.
-It is a demonstration of concept, domain knowledge,
-and data engineering skill by Thabo Kunene.
-"""
-
+# Standard library imports for data modeling and date/time handling
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
 import logging
 
+# Internal error and logging configurations
 from afriflow.exceptions import BriefingGenerationError
 from afriflow.logging_config import get_logger
+
+# Integration with the enhanced talking points generation engine
 from afriflow.integration.client_briefing.talking_points_engine import (
     TalkingPointsEngine,
     EmptyInputError,
@@ -41,44 +41,42 @@ from afriflow.integration.client_briefing.talking_points_engine import (
     ProcessingTimeoutError,
 )
 
-# Module-level logger — scoped to client_briefing.generator so log filters
-# can target this module independently of the rest of the application.
+# Module-level logger for briefing generation diagnostics
 logger = get_logger("client_briefing.generator")
 
 
 # ---------------------------------------------------------------------------
 # Data-transfer objects (dataclasses)
-# These lightweight containers carry structured data through the pipeline
-# without any external dependencies; they are safe to serialise, compare,
-# and pass across service boundaries.
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class ChangeEvent:
-    """Something that changed since the last meeting.
+    """
+    Something that changed since the last meeting.
 
-    :param domain: Source domain that produced the change (e.g. 'forex', 'shadow').
-    :param description: Human-readable summary of the change.
-    :param magnitude: Relative size of the change — 'NORMAL', 'HIGH', etc.
-    :param direction: Whether the change is positive, negative, or neutral.
+    :param domain: Source domain that produced the change (e.g. 'forex')
+    :param description: Human-readable summary of the change
+    :param magnitude: Relative size of the change (e.g., 'NORMAL', 'HIGH')
+    :param direction: Whether the change is positive, negative, or neutral
     """
 
     domain: str
     description: str
-    magnitude: str = "NORMAL"   # Default: treat unclassified changes as normal
-    direction: str = "NEUTRAL"  # Default: unknown direction until enriched
+    magnitude: str = "NORMAL"
+    direction: str = "NEUTRAL"
 
 
 @dataclass
 class Opportunity:
-    """A revenue opportunity for the RM to discuss.
+    """
+    A revenue opportunity for the RM to discuss.
 
-    :param rank: Ordering priority — lower rank means higher priority.
-    :param description: Short narrative of the opportunity.
-    :param estimated_value_zar: Rough ZAR revenue or deal-value estimate.
-    :param source_signal: Which signal or data source surfaced this opportunity.
-    :param talking_point: Pre-built conversation starter for the RM.
+    :param rank: Ordering priority (lower = higher priority)
+    :param description: Short narrative of the opportunity
+    :param estimated_value_zar: Rough ZAR revenue or deal-value estimate
+    :param source_signal: Which signal surfaced this opportunity
+    :param talking_point: Pre-built conversation starter for the RM
     """
 
     rank: int
@@ -90,12 +88,13 @@ class Opportunity:
 
 @dataclass
 class RiskAlert:
-    """A risk the RM should be aware of.
+    """
+    A risk the RM should be aware of.
 
-    :param domain: Domain that owns the risk (e.g. 'forex', 'insurance').
-    :param description: Concise description of the risk.
-    :param severity: Criticality level — 'LOW', 'MEDIUM', or 'HIGH'.
-    :param recommended_discussion_point: Suggested action or talking point for the RM.
+    :param domain: Domain that owns the risk (e.g. 'insurance')
+    :param description: Concise description of the risk
+    :param severity: Criticality level (e.g., 'LOW', 'MEDIUM', 'HIGH')
+    :param recommended_discussion_point: Suggested action for the RM
     """
 
     domain: str
@@ -106,12 +105,13 @@ class RiskAlert:
 
 @dataclass
 class BriefingSection:
-    """A titled, prioritised content block within a ClientBriefing.
+    """
+    A titled, prioritised content block within a ClientBriefing.
 
-    :param title: Section heading displayed in the rendered output.
-    :param icon: Short prefix marker (e.g. '[R]') for visual scanning.
-    :param content: Ordered list of line items in this section.
-    :param priority: Urgency level used for rendering emphasis — 'NORMAL', 'HIGH', 'CRITICAL'.
+    :param title: Section heading displayed in the output
+    :param icon: Short prefix marker for visual scanning
+    :param content: Ordered list of line items in this section
+    :param priority: Urgency level (e.g., 'NORMAL', 'CRITICAL')
     """
 
     title: str
@@ -122,24 +122,25 @@ class BriefingSection:
 
 @dataclass
 class ClientBriefing:
-    """The complete pre-meeting briefing artifact delivered to the RM.
+    """
+    The complete pre-meeting briefing artifact delivered to the RM.
 
-    :param client_golden_id: Canonical entity-resolution ID from the golden record.
-    :param client_name: Display name of the client.
-    :param client_tier: Tier classification (e.g. 'PLATINUM', 'GOLD').
-    :param meeting_datetime: ISO-formatted date/time of the upcoming meeting.
-    :param relationship_manager: Full name of the assigned RM.
-    :param total_relationship_value_zar: Aggregate wallet-of-business in ZAR.
-    :param health_status: High-level risk signal for the relationship.
-    :param domains_active: Map of domain name → bool indicating active presence.
-    :param changes_since_last_meeting: List of notable changes detected recently.
-    :param top_opportunities: Ranked list of revenue opportunities.
-    :param risk_alerts: Active risks requiring RM attention.
-    :param talking_points: Suggested conversation starters for the meeting.
-    :param relationship_snapshot: Structured overview section.
-    :param seasonal_context: Optional seasonal/commodity context section.
-    :param last_meeting_date: Date of the previous meeting, if known.
-    :param generated_at: Timestamp when this briefing was assembled.
+    :param client_golden_id: Canonical entity-resolution ID
+    :param client_name: Display name of the client
+    :param client_tier: Tier classification (e.g. 'PLATINUM')
+    :param meeting_datetime: ISO-formatted date/time of the upcoming meeting
+    :param relationship_manager: Full name of the assigned RM
+    :param total_relationship_value_zar: Aggregate wallet-of-business in ZAR
+    :param health_status: High-level risk signal for the relationship
+    :param domains_active: Map of domain name -> bool indicating active presence
+    :param changes_since_last_meeting: List of notable changes detected recently
+    :param top_opportunities: Ranked list of revenue opportunities
+    :param risk_alerts: Active risks requiring RM attention
+    :param talking_points: Suggested conversation starters for the meeting
+    :param relationship_snapshot: Structured overview section
+    :param seasonal_context: Optional seasonal/commodity context section
+    :param last_meeting_date: Date of the previous meeting, if known
+    :param generated_at: Timestamp when this briefing was assembled
     """
 
     client_golden_id: str
@@ -160,10 +161,8 @@ class ClientBriefing:
     generated_at: str
 
     def render_text(self) -> str:
-        """Render the briefing as a plain-text string suitable for email or terminal.
-
-        Sections are printed in the following order:
-        header → snapshot → changes → opportunities → risks → seasonal → talking points.
+        """
+        Render the briefing as a plain-text string suitable for email or terminal.
 
         :return: Multi-line string representation of the full briefing.
         """
@@ -176,7 +175,6 @@ class ClientBriefing:
         lines.append(f"When: {self.meeting_datetime}")
         lines.append(f"Value: {self.total_relationship_value_zar:,.0f}")
         if self.last_meeting_date:
-            # Only surface this line when a previous meeting date is known
             lines.append(f"Last meeting: {self.last_meeting_date}")
 
         # --- Relationship Snapshot section ---
@@ -185,17 +183,16 @@ class ClientBriefing:
         for item in self.relationship_snapshot.content:
             lines.append(f"- {item}")
 
-        # --- Changes since last meeting: surface deltas so the RM is up to date ---
+        # --- Changes since last meeting ---
         lines.append("")
         lines.append("[C] CHANGES SINCE LAST MEETING")
         if self.changes_since_last_meeting:
             for c in self.changes_since_last_meeting:
-                # Format: [domain] description
                 lines.append(f"- [{c.domain}] {c.description}")
         else:
             lines.append("- No significant changes")
 
-        # --- Top opportunities: ranked revenue actions for this meeting ---
+        # --- Top opportunities ---
         lines.append("")
         lines.append("[$] TOP OPPORTUNITIES")
         if self.top_opportunities:

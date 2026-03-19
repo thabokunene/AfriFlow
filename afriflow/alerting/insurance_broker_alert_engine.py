@@ -7,7 +7,7 @@
              CIB credit exposure, and claim frequency surges that may indicate
              systemic risk or fraud.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 # Insurance Broker Alert Engine
@@ -23,11 +23,13 @@
 # Disclaimer: Portfolio project by Thabo Kunene. Not a
 # Standard Bank Group product. All data is simulated.
 
-from __future__ import annotations  # Enables forward references in annotations
+# Future import for forward references in type hints
+from __future__ import annotations
 
-from dataclasses import dataclass, field  # Structured data containers with defaults
-from datetime import datetime, timedelta  # Alert timestamps and SLA calculations
-from typing import Dict, List, Optional   # Type annotations for safety and IDE support
+# Standard library imports for data classes, date/time logic, and typing
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -36,21 +38,21 @@ from typing import Dict, List, Optional   # Type annotations for safety and IDE 
 
 @dataclass
 class InsuranceBrokerAlert:
-    """A single insurance broker alert.
+    """
+    A single insurance broker alert representing a risk or opportunity.
 
-    :param alert_id: Unique ID with prefix INS-<TYPE>-<CLIENT>[-<POLICY>]
-    :param broker_id: ID of the insurance broker who manages this client
-    :param client_golden_id: Unified client ID from entity resolution layer
-    :param client_name: Human-readable name for broker dashboard display
-    :param alert_type: RENEWAL_DUE / COVERAGE_GAP / CLAIM_SURGE /
-                       UNDERINSURANCE / FREE_LOOK_END
-    :param urgency: IMMEDIATE / HIGH / MEDIUM / LOW — drives sort and delivery priority
-    :param policy_id: Policy identifier, or None for client-level alerts (e.g. COVERAGE_GAP)
-    :param headline: One-line alert title
-    :param details: Full alert context for broker preparation
-    :param recommended_action: Specific next step the broker should take
-    :param estimated_premium_zar: Estimated annual premium value at risk or opportunity size
-    :param created_at: ISO timestamp of alert generation
+    :param alert_id: Unique identifier for the alert
+    :param broker_id: The ID of the broker responsible for the client
+    :param client_golden_id: Unified client identifier
+    :param client_name: Display name of the client
+    :param alert_type: Category of insurance alert (e.g., RENEWAL_DUE)
+    :param urgency: Priority level for the broker (e.g., HIGH)
+    :param policy_id: ID of the policy if specific, else None
+    :param headline: Brief summary of the alert
+    :param details: In-depth context for broker preparation
+    :param recommended_action: Suggested next step for the broker
+    :param estimated_premium_zar: Estimated premium value at risk or potential upsell
+    :param created_at: Timestamp when the alert was generated
     """
 
     alert_id: str
@@ -59,29 +61,33 @@ class InsuranceBrokerAlert:
     client_name: str
     alert_type: str
     urgency: str
-    policy_id: Optional[str]           # None for alerts not tied to a specific policy
+    policy_id: Optional[str]
     headline: str
     details: str
     recommended_action: str
-    estimated_premium_zar: float       # Renewal value, gap opportunity, or uplift estimate
+    estimated_premium_zar: float
+    # Automatically capture the creation time of the alert
     created_at: str = field(
-        default_factory=lambda: datetime.now().isoformat()  # Auto-stamped at creation
+        default_factory=lambda: datetime.now().isoformat()
     )
 
 
 @dataclass
 class InsuranceBrokerAlertBatch:
-    """Batch of all insurance broker alerts for a broker's client portfolio.
+    """
+    A collection of insurance alerts for a single broker's portfolio.
 
-    :param broker_id: ID of the broker this batch belongs to
-    :param alerts: Priority-sorted list of InsuranceBrokerAlert objects
-    :param total_premium_at_risk_zar: Sum of estimated_premium_zar across all alerts
-    :param generated_at: ISO timestamp when the batch was generated
+    :param broker_id: The ID of the broker receiving the batch
+    :param alerts: List of InsuranceBrokerAlert objects
+    :param total_premium_at_risk_zar: Aggregate premium value across the batch
+    :param generated_at: When the batch was compiled
     """
 
     broker_id: str
     alerts: List[InsuranceBrokerAlert]
-    total_premium_at_risk_zar: float   # KPI: total premium revenue in the broker's action queue
+    # Sum of premium values for all alerts in the batch
+    total_premium_at_risk_zar: float
+    # Timestamp marking the completion of batch generation
     generated_at: str = field(
         default_factory=lambda: datetime.now().isoformat()
     )
@@ -93,34 +99,12 @@ class InsuranceBrokerAlertBatch:
 
 class InsuranceBrokerAlertEngine:
     """
-    Generate insurance broker alerts from insurance and CIB profiles.
-
-    For each client in the broker's portfolio, the engine runs five
-    detection algorithms: renewal due, free-look ending, coverage gap,
-    underinsurance, and claim surge. Results are sorted by urgency and
-    returned as a single InsuranceBrokerAlertBatch.
-
-    Intended recipient: insurance brokers covering commercial clients.
-
-    Usage::
-
-        engine = InsuranceBrokerAlertEngine()
-        batch = engine.build_batch(
-            broker_id="BRK-012",
-            client_portfolio=[
-                {
-                    "golden_id": "GLD-001",
-                    "client_name": "Acme",
-                    "insurance_profile": {...},
-                    "cib_profile": {...},
-                }
-            ],
-        )
+    Engine responsible for identifying insurance risks and opportunities by
+    correlating insurance policy data with CIB exposure and market signals.
     """
 
-    # Renewal alert thresholds: alerts fire at each of these day counts before expiry.
-    # Multiple thresholds ensure early warnings (60 days) escalate to urgent (7 days).
-    _RENEWAL_THRESHOLDS = [7, 14, 30, 60]   # days before expiry
+    # Defined days before expiry when renewal alerts should trigger
+    _RENEWAL_THRESHOLDS = [7, 14, 30, 60]
 
     def build_batch(
         self,
@@ -128,31 +112,26 @@ class InsuranceBrokerAlertEngine:
         client_portfolio: List[Dict],
     ) -> InsuranceBrokerAlertBatch:
         """
-        Build a sorted alert batch for a single insurance broker.
+        Scan a broker's entire portfolio and generate a prioritized alert batch.
 
-        Iterates over every client in the portfolio, runs all detectors,
-        sorts the combined alerts by urgency, and sums up premium-at-risk.
-
-        :param broker_id: ID of the insurance broker
-        :param client_portfolio: List of client dicts with 'insurance_profile'
-                                 and 'cib_profile' sub-objects
-        :return: InsuranceBrokerAlertBatch sorted IMMEDIATE → LOW
+        :param broker_id: Unique ID of the target insurance broker
+        :param client_portfolio: List of client profiles with insurance and CIB data
+        :return: An InsuranceBrokerAlertBatch sorted by urgency.
         """
         alerts: List[InsuranceBrokerAlert] = []
 
-        # Run all five detectors for every client in the broker's book
+        # Iterate through every client in the portfolio to detect insurance anomalies
         for client in client_portfolio:
             alerts.extend(self._process_client(broker_id, client))
 
-        # Sort by urgency so the broker's most time-sensitive actions appear first.
-        # IMMEDIATE=0, HIGH=1, MEDIUM=2, LOW=3; unknown urgencies are deprioritised.
+        # Sort alerts by urgency (IMMEDIATE first) for broker productivity
         alerts.sort(
             key=lambda a: {"IMMEDIATE": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}.get(
                 a.urgency, 9
             )
         )
 
-        # KPI: total premium represented in the broker's current action queue
+        # Calculate the total value at risk for the broker's action queue
         total_at_risk = sum(a.estimated_premium_zar for a in alerts)
 
         return InsuranceBrokerAlertBatch(
@@ -165,28 +144,26 @@ class InsuranceBrokerAlertEngine:
         self, broker_id: str, client: Dict
     ) -> List[InsuranceBrokerAlert]:
         """
-        Run all alert detectors for a single client and return any alerts generated.
+        Run all insurance-specific detectors for a single client profile.
 
         :param broker_id: ID of the insurance broker
-        :param client: Client dict with 'golden_id', 'client_name',
-                       'insurance_profile', and 'cib_profile' keys
-        :return: List of InsuranceBrokerAlert objects (may be empty)
+        :param client: Combined client data dictionary
+        :return: List of generated InsuranceBrokerAlert objects.
         """
         alerts: List[InsuranceBrokerAlert] = []
 
-        # Extract standard client identifiers
+        # Extract core identifiers and profile segments
         golden_id = client.get("golden_id", "UNK")
         client_name = client.get("client_name", "Unknown")
-        ins = client.get("insurance_profile", {})   # Insurance data: policies, claims, coverage
-        cib = client.get("cib_profile", {})          # CIB data: corridors, facility value, trade
+        ins = client.get("insurance_profile", {})
+        cib = client.get("cib_profile", {})
 
-        # A client with no insurance profile has no actionable insurance alerts
+        # If no insurance data exists, the engine cannot perform its checks
         if not ins:
             return []
 
         # --- Detector 1: Renewal due ---
-        # Check each individual policy for upcoming expiry within 60 days.
-        # Runs per-policy because a client may hold multiple policies with different expiries.
+        # Check for policies expiring within the defined thresholds
         for policy in ins.get("policies", []):
             alert = self._renewal_alert(
                 broker_id, golden_id, client_name, policy
@@ -195,8 +172,7 @@ class InsuranceBrokerAlertEngine:
                 alerts.append(alert)
 
             # --- Detector 2: Free-look ending ---
-            # Newly issued policies have a free-look period during which the
-            # client may cancel without penalty. Ends within 7 days = HIGH urgency.
+            # Identify new policies whose cooling-off period is expiring
             alert = self._free_look_alert(
                 broker_id, golden_id, client_name, policy
             )

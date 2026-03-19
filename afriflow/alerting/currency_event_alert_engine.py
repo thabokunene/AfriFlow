@@ -7,7 +7,7 @@
              point spikes — enriched with client impact and hedging revenue
              estimates.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 # Currency Event Alert Engine
@@ -32,11 +32,13 @@
 # Disclaimer: Portfolio project by Thabo Kunene. Not a
 # Standard Bank Group product. All data is simulated.
 
-from __future__ import annotations  # Enables PEP 563 postponed evaluation of annotations
+# Future import for forward references in type hints
+from __future__ import annotations
 
-from dataclasses import dataclass, field  # Lightweight data containers with auto __init__
-from datetime import datetime             # Timestamp generation for event IDs and detection times
-from typing import Dict, List, Optional   # Type hints for clarity and IDE support
+# Standard library imports for structured data, timestamps, and type hinting
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +48,6 @@ from typing import Dict, List, Optional   # Type hints for clarity and IDE suppo
 # Normal daily vol (annualised / sqrt(252)) by currency pair.
 # These baselines are used to identify rate shocks: a session move
 # exceeding 2× the normal daily vol triggers a RATE_SHOCK event.
-# Higher values (e.g. ZWL 3.0%) reflect chronically volatile currencies.
 _NORMAL_DAILY_VOL: Dict[str, float] = {
     "NGAZAR": 0.010,   # Nigerian Naira / ZAR — moderate vol, prone to policy shocks
     "KESAZAR": 0.008,  # Kenyan Shilling / ZAR — relatively stable
@@ -73,7 +74,6 @@ _NORMAL_DAILY_VOL: Dict[str, float] = {
 # Parallel premium regulatory thresholds by country ISO-2 code.
 # When the parallel market rate diverges from the official rate by
 # more than this threshold, a PARALLEL_COLLAPSE event is triggered.
-# Thresholds reflect each country's enforcement tolerance.
 _PARALLEL_THRESHOLD: Dict[str, float] = {
     "NG": 0.15,  # Nigeria: CBN tolerates up to 15% divergence before intervention
     "EG": 0.12,  # Egypt: 12% threshold; EGP devaluation history makes this relevant
@@ -89,20 +89,20 @@ _PARALLEL_THRESHOLD: Dict[str, float] = {
 
 @dataclass
 class CurrencyEvent:
-    """A single detected currency market event.
+    """
+    A single detected currency market event. Represents a significant move or anomaly.
 
-    :param event_id: Unique identifier, format EVT-<TYPE>-<PAIR>-<HHMM>
-    :param event_type: One of RATE_SHOCK, PARALLEL_COLLAPSE, CORRIDOR_ILLIQUID,
-                       SWAP_POINTS_SPIKE, REGIME_CHANGE, CARRY_OPPORTUNITY
-    :param currency_pair: FX pair in format 'NGN/ZAR'
-    :param country: ISO-2 country code derived from the base currency
-    :param severity: LOW / MEDIUM / HIGH / CRITICAL — drives routing priority
-    :param headline: One-line summary for push notifications and dashboards
-    :param market_commentary: Plain-English trading desk note for client calls
-    :param affected_client_count: Estimated number of clients with exposure
-    :param total_client_exposure_zar: Aggregate client exposure in ZAR
-    :param hedging_revenue_opportunity_zar: Estimated hedging fee income from event
-    :param detected_at: ISO timestamp when the event was detected
+    :param event_id: Unique identifier for the event
+    :param event_type: Category of the event (e.g., RATE_SHOCK)
+    :param currency_pair: The FX pair involved (e.g., NGN/ZAR)
+    :param country: ISO-2 country code for the base currency
+    :param severity: Priority level (LOW to CRITICAL)
+    :param headline: Brief summary for notifications
+    :param market_commentary: In-depth trading desk commentary
+    :param affected_client_count: Number of clients with exposure to this pair
+    :param total_client_exposure_zar: Sum of exposure in ZAR for affected clients
+    :param hedging_revenue_opportunity_zar: Estimated potential revenue from hedging
+    :param detected_at: Timestamp of when the event was identified
     """
 
     event_id: str
@@ -115,34 +115,46 @@ class CurrencyEvent:
     affected_client_count: int
     total_client_exposure_zar: float
     hedging_revenue_opportunity_zar: float
+    # Default factory ensures each event gets a unique current timestamp
     detected_at: str = field(
-        default_factory=lambda: datetime.now().isoformat()  # Defaults to current time
+        default_factory=lambda: datetime.now().isoformat()
     )
 
 
 @dataclass
 class CurrencyEventReport:
-    """All currency events detected in the current market scan.
+    """
+    Aggregation of all currency events detected during a single market scan.
 
-    :param events: List of CurrencyEvent objects, sorted by severity (CRITICAL first)
-    :param scan_timestamp: ISO timestamp of when the scan was executed
-    :param total_market_exposure_zar: Sum of all client exposures across all events
+    :param events: List of detected CurrencyEvent objects
+    :param scan_timestamp: When the scan was performed
+    :param total_market_exposure_zar: Total exposure across all events in this report
     """
 
     events: List[CurrencyEvent]
+    # Timestamp marking the start of the scan process
     scan_timestamp: str = field(
-        default_factory=lambda: datetime.now().isoformat()  # Records when scan ran
+        default_factory=lambda: datetime.now().isoformat()
     )
-    total_market_exposure_zar: float = 0.0  # Aggregate ZAR exposure across all detected events
+    # Accumulator for aggregate exposure across the entire report
+    total_market_exposure_zar: float = 0.0
 
     @property
     def critical_events(self) -> List[CurrencyEvent]:
-        """Filter events to CRITICAL severity only — for emergency escalation."""
+        """
+        Filters the report to only show CRITICAL events.
+
+        :return: A list of CurrencyEvent objects with severity 'CRITICAL'.
+        """
         return [e for e in self.events if e.severity == "CRITICAL"]
 
     @property
     def high_events(self) -> List[CurrencyEvent]:
-        """Filter events to HIGH severity — for same-day action queue."""
+        """
+        Filters the report to only show HIGH events.
+
+        :return: A list of CurrencyEvent objects with severity 'HIGH'.
+        """
         return [e for e in self.events if e.severity == "HIGH"]
 
 
@@ -152,21 +164,10 @@ class CurrencyEventReport:
 
 class CurrencyEventAlertEngine:
     """
-    Scan rate ticks and market data for currency events.
+    Core engine responsible for scanning market data and identifying currency events.
 
-    Iterates over live rate ticks, applies four detection algorithms
-    (rate shock, parallel collapse, illiquidity, swap spike), enriches
-    each event with client impact data, and returns a severity-sorted
-    CurrencyEventReport. Intended recipient: sales and trading desks.
-
-    Usage::
-
-        engine = CurrencyEventAlertEngine()
-        report = engine.scan(
-            rate_ticks=[...],          # List of current rate snapshots
-            prior_ticks=[...],         # Previous period for comparison
-            client_exposures=[...],    # Aggregated client exposure by pair
-        )
+    Iterates over live rate ticks, compares them against historical baselines and
+    previous periods, and calculates client impact.
     """
 
     def scan(
@@ -176,23 +177,19 @@ class CurrencyEventAlertEngine:
         client_exposures: Optional[Dict[str, float]] = None,
     ) -> CurrencyEventReport:
         """
-        Scan market data for currency events across all monitored pairs.
+        Perform a full market scan for currency anomalies.
 
-        For each rate tick, four event detectors are applied in sequence.
-        Events are enriched with client exposure data and sorted by severity.
-
-        :param rate_ticks: List of dicts with keys: currency_pair, mid_rate, bid_rate,
-                           ask_rate, parallel_rate, swap_points_3m, annualised_vol
-        :param prior_ticks: Previous scan's rate ticks for computing intraday moves
-        :param client_exposures: Dict mapping currency_pair → aggregate ZAR exposure
-        :return: CurrencyEventReport with severity-sorted event list
+        :param rate_ticks: Current market rates and indicators
+        :param prior_ticks: Rates from the previous scan for trend analysis
+        :param client_exposures: Mapping of currency pairs to client exposure values
+        :return: A CurrencyEventReport containing all identified events.
         """
-        prior = prior_ticks or []         # Default to empty list if no prior period provided
-        exposures = client_exposures or {}  # Default to zero exposure if not supplied
+        # Initialize defaults for optional parameters
+        prior = prior_ticks or []
+        exposures = client_exposures or {}
         events: List[CurrencyEvent] = []
 
-        # Build a lookup map from the prior period: pair → tick dict
-        # This allows O(1) lookups when comparing current vs prior rates
+        # Map prior ticks by currency pair for O(1) comparison lookup
         prior_map: Dict[str, Dict] = {
             t["currency_pair"]: t for t in prior if "currency_pair" in t
         }

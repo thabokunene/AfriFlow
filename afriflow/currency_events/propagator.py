@@ -1,22 +1,35 @@
 """
-Currency Event Propagator
-
-When a major FX event occurs, we propagate the impact
-across all affected domains and recalculate cross-domain
-signals for every affected client.
-
-DISCLAIMER: This project is not a sanctioned initiative
-of Standard Bank Group, MTN, or any affiliated entity.
-It is a demonstration of concept, domain knowledge,
-and data engineering skill by Thabo Kunene.
+@file propagator.py
+@description Orchestrates the cross-domain propagation of currency events.
+             Identifies all clients with exposure to a specific currency across
+             CIB, Forex, Insurance, Cell, and PBB domains, and calculates the
+             cumulative impact of market movements. Generates actionable
+             recommendations for relationship managers based on the severity
+             and nature of the event.
+@author Thabo Kunene
+@created 2026-03-19
 """
 
+# Currency Event Propagator
+#
+# When a major FX event occurs, we propagate the impact
+# across all affected domains and recalculate cross-domain
+# signals for every affected client.
+#
+# Disclaimer: Portfolio project by Thabo Kunene. Not a
+# Standard Bank Group product. All data is simulated.
+
+# Future import for forward references in type hints
+from __future__ import annotations
+
+# Standard library imports for data modeling and type hinting
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
 import logging
 from enum import Enum
 
+# Internal classification, constants, exceptions, and logging
 from afriflow.currency_events.event_classifier import (
     CurrencyEvent,
     EventTier,
@@ -29,14 +42,23 @@ from afriflow.currency_events.constants import (
 from afriflow.exceptions import CurrencyPropagationError
 from afriflow.logging_config import get_logger, log_operation
 
+# Initialise a module-scoped logger for propagation events
 logger = get_logger("currency_events.propagator")
 
 
 @dataclass
 class DomainImpact:
     """
-    We represent the impact of a currency event on
-    a specific domain for a specific client.
+    Represents the impact of a currency event on a specific client/domain pair.
+
+    :param golden_id: The unique identifier for the client
+    :param domain: The business domain impacted (e.g., 'forex')
+    :param impact_type: Categorisation of the impact (e.g., 'MTM_LOSS')
+    :param description: Narrative summary of how the client is affected
+    :param impact_value_zar: Estimated financial impact in ZAR
+    :param action_required: True if an RM needs to intervene
+    :param recommended_action: Suggested next step for the RM
+    :param urgency: Priority level for the intervention (e.g., 'HIGH')
     """
 
     golden_id: str
@@ -52,22 +74,32 @@ class DomainImpact:
 @dataclass
 class PropagationResult:
     """
-    We collect all domain impacts from propagating
-    a currency event.
+    Aggregation of all client impacts resulting from a single currency event.
+
+    :param event: The source CurrencyEvent object
+    :param total_clients_affected: Distinct count of clients with any impact
+    :param total_exposure_zar: Cumulative ZAR exposure across all affected clients
+    :param domain_impacts: Detailed list of per-client, per-domain impact records
+    :param propagation_timestamp: When the propagation calculation was executed
     """
 
     event: CurrencyEvent
     total_clients_affected: int
     total_exposure_zar: float
     domain_impacts: List[DomainImpact]
+    # Automatically timestamp the result creation
     propagation_timestamp: str = field(
         default_factory=lambda: datetime.now().isoformat()
     )
 
     @property
     def summary(self) -> Dict:
-        """We generate a summary for ExCo reporting."""
+        """
+        Generate a high-level summary for executive reporting.
 
+        :return: A dictionary containing key metrics for the entire event.
+        """
+        # Count impacts per domain for the summary table
         domain_counts = {}
         for impact in self.domain_impacts:
             domain_counts[impact.domain] = (
@@ -96,11 +128,14 @@ class PropagationResult:
 
 class CurrencyEventPropagator:
     """
-    We propagate currency events across all five domains
-    for every affected client.
+    Engine for calculating cross-domain impact of market movements.
     """
 
     def __init__(self):
+        """
+        Initialise the propagator with an empty exposure registry.
+        """
+        # Registry of client exposures: {golden_id: { "currency:domain": details_dict }}
         self.client_exposures: Dict[
             str, Dict[str, Dict]
         ] = {}
@@ -114,13 +149,18 @@ class CurrencyEventPropagator:
         exposure_details: Dict
     ):
         """
-        We register a client's exposure to a currency
-        in a specific domain.
-        """
+        Record a client's exposure to a specific currency within a business domain.
 
+        :param golden_id: Client identifier
+        :param currency: 3-letter currency code
+        :param domain: Domain name (e.g., 'cib')
+        :param exposure_details: Dictionary containing amount, tenor, etc.
+        """
+        # Ensure the client exists in our registry
         if golden_id not in self.client_exposures:
             self.client_exposures[golden_id] = {}
 
+        # Use a composite key to store the specific exposure
         key = f"{currency}:{domain}"
         self.client_exposures[golden_id][key] = (
             exposure_details
@@ -130,25 +170,28 @@ class CurrencyEventPropagator:
         self, event: CurrencyEvent
     ) -> PropagationResult:
         """
-        We propagate a currency event across all
-        affected domains and clients.
-        """
+        Calculate and collect all domain impacts for a classified event.
 
+        :param event: The classified CurrencyEvent to propagate
+        :return: A PropagationResult containing all identified impacts.
+        """
         impacts = []
         affected_clients = set()
         total_exposure = 0.0
 
         currency = event.currency_code
+        # Lookup the country associated with the base currency
         country = CURRENCY_COUNTRY_MAP.get(
             currency, "UNKNOWN"
         )
 
+        # Iterate through every registered client to check for exposure
         for golden_id, exposures in (
             self.client_exposures.items()
         ):
             client_impacts = []
 
-            # CIB impact
+            # --- CIB impact propagation ---
             cib_key = f"{currency}:{DOMAIN_CIB}"
             if (
                 cib_key in exposures
@@ -161,7 +204,7 @@ class CurrencyEventPropagator:
                 if impact:
                     client_impacts.append(impact)
 
-            # Forex impact
+            # --- Forex impact propagation ---
             forex_key = f"{currency}:{DOMAIN_FOREX}"
             if (
                 forex_key in exposures
@@ -174,7 +217,7 @@ class CurrencyEventPropagator:
                 if impact:
                     client_impacts.append(impact)
 
-            # Insurance impact
+            # --- Insurance impact propagation ---
             ins_key = f"{currency}:{DOMAIN_INSURANCE}"
             if (
                 ins_key in exposures
@@ -187,7 +230,7 @@ class CurrencyEventPropagator:
                 if impact:
                     client_impacts.append(impact)
 
-            # Cell/MoMo impact
+            # --- Cell/MoMo impact propagation ---
             cell_key = f"{currency}:{DOMAIN_CELL}"
             if (
                 cell_key in exposures

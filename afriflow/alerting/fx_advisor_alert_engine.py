@@ -6,7 +6,7 @@
              divergence, and central bank intervention signals. Each alert
              includes a suggested action and indicative rate for client calls.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 # FX Advisor Alert Engine
@@ -33,11 +33,13 @@
 # Disclaimer: Portfolio project by Thabo Kunene. Not a
 # Standard Bank Group product. All data is simulated.
 
-from __future__ import annotations  # PEP 563: enables forward references in type hints
+# Future import for forward references in type hints
+from __future__ import annotations
 
-from dataclasses import dataclass, field  # Lightweight immutable data containers
-from datetime import datetime, timedelta  # For alert creation time and expiry calculation
-from typing import Dict, List, Optional   # Type annotations for readability
+# Standard library imports for data modeling and date/time handling
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -67,23 +69,23 @@ _VOLATILITY_SPIKE_THRESHOLD = 0.30   # 30% annualised vol
 
 @dataclass
 class FXAdvisorAlert:
-    """A single FX advisor alert.
+    """
+    A single FX advisor alert focused on a specific client and currency pair.
 
-    :param alert_id: Unique ID with prefix FX-<TYPE>-<CLIENT>-<PAIR>
-    :param fx_advisor_id: ID of the FX advisor who owns this client relationship
-    :param client_golden_id: Unified client identifier from entity resolution
-    :param client_name: Human-readable client name for display
-    :param alert_type: RATE_THRESHOLD / VOLATILITY_SPIKE / FORWARD_EXPIRY /
-                       PARALLEL_DIVERGENCE / CB_INTERVENTION
-    :param currency_pair: FX pair this alert relates to e.g. 'NGN/ZAR'
-    :param urgency: IMMEDIATE / HIGH / MEDIUM / LOW — drives sort order and delivery
-    :param headline: One-line alert title for push notification / dashboard card
-    :param details: Expanded context for the advisor's call preparation
-    :param suggested_action: Specific recommended next step for the advisor
-    :param indicative_rate: Current market rate for reference during client call
-    :param notional_at_risk_zar: Client exposure in ZAR affected by this alert
-    :param created_at: ISO timestamp of alert creation
-    :param expires_at: ISO timestamp after which the alert is stale
+    :param alert_id: Unique identifier for the alert
+    :param fx_advisor_id: The ID of the advisor assigned to this client
+    :param client_golden_id: The unified client identifier
+    :param client_name: Display name of the client
+    :param alert_type: The category of FX event (e.g., RATE_THRESHOLD)
+    :param currency_pair: The FX pair being monitored
+    :param urgency: Priority level for action (e.g., IMMEDIATE)
+    :param headline: Brief summary title for the alert
+    :param details: In-depth context for advisor preparation
+    :param suggested_action: Recommended conversational opener or trade action
+    :param indicative_rate: Current mid-market rate for reference
+    :param notional_at_risk_zar: Total client exposure impacted by this alert
+    :param created_at: Timestamp when the alert was generated
+    :param expires_at: Timestamp when the alert becomes stale
     """
 
     alert_id: str
@@ -97,27 +99,31 @@ class FXAdvisorAlert:
     headline: str
     details: str
     suggested_action: str
-    indicative_rate: Optional[float]   # Current mid-rate; None if not available in ticks
+    indicative_rate: Optional[float]
     notional_at_risk_zar: float
+    # Automatically timestamp the alert upon creation
     created_at: str = field(
-        default_factory=lambda: datetime.now().isoformat()  # Auto-stamp at creation
+        default_factory=lambda: datetime.now().isoformat()
     )
-    expires_at: str = ""  # Populated by engine; empty string = no expiry set
+    # Expiry is calculated by the engine based on urgency
+    expires_at: str = ""
 
 
 @dataclass
 class FXAdvisorAlertBatch:
-    """All FX alerts for an advisor, sorted by urgency.
+    """
+    A collection of FX alerts for a single advisor, typically generated in one run.
 
-    :param advisor_id: ID of the FX advisor this batch belongs to
-    :param alerts: List of FXAdvisorAlert objects, sorted IMMEDIATE → LOW
-    :param generated_at: ISO timestamp when the batch was built
+    :param advisor_id: The ID of the advisor receiving the batch
+    :param alerts: List of FXAdvisorAlert objects
+    :param generated_at: When the batch was compiled
     """
 
     advisor_id: str
     alerts: List[FXAdvisorAlert]
+    # Timestamp marking the completion of the batch generation
     generated_at: str = field(
-        default_factory=lambda: datetime.now().isoformat()  # Batch generation timestamp
+        default_factory=lambda: datetime.now().isoformat()
     )
 
 
@@ -127,31 +133,11 @@ class FXAdvisorAlertBatch:
 
 class FXAdvisorAlertEngine:
     """
-    Generate FX-specific alerts for an FX advisor's client book.
-
-    For each client exposure, the engine checks:
-      - Stop-loss and take-profit level breaches (RATE_THRESHOLD)
-      - Annualised volatility spike above 30% (VOLATILITY_SPIKE)
-      - Forward contracts maturing within 14 days without rollover (FORWARD_EXPIRY)
-
-    Additionally, parallel market divergence alerts are generated at the
-    market level (not client-specific) for NG, EG, ZW, ET, AO corridors.
-
-    Alerts are sorted by urgency: IMMEDIATE first, then HIGH, MEDIUM, LOW.
-    Intended recipient: FX advisors / treasury sales teams.
-
-    Usage::
-
-        engine = FXAdvisorAlertEngine()
-        batch = engine.build_batch(
-            advisor_id="FX-ADV-007",
-            rate_ticks=[...],
-            client_exposures=[...],
-            active_forwards=[...],
-        )
+    Engine responsible for generating FX-specific alerts by evaluating client
+    exposures against market rate movements and contract data.
     """
 
-    # Urgency sort order: lower number = higher urgency = shown first in UI
+    # Maps urgency strings to integers for prioritized sorting
     _URGENCY_ORDER = {"IMMEDIATE": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
 
     def build_batch(
@@ -162,38 +148,34 @@ class FXAdvisorAlertEngine:
         active_forwards: Optional[List[Dict]] = None,
     ) -> FXAdvisorAlertBatch:
         """
-        Build a sorted alert batch for a single FX advisor.
+        Evaluate an entire advisor's client book and generate a prioritized alert batch.
 
-        Processes every client exposure in the advisor's book, then appends
-        any market-level parallel divergence alerts. Sorts the combined list
-        by urgency before returning.
-
-        :param advisor_id: ID of the FX advisor
-        :param rate_ticks: Current market rate ticks (list of dicts)
-        :param client_exposures: List of client exposure dicts from the advisor's book
-        :param active_forwards: Optional list of active forward contracts to check for expiry
-        :return: FXAdvisorAlertBatch sorted by urgency
+        :param advisor_id: Unique ID of the target advisor
+        :param rate_ticks: Current market pricing and volatility data
+        :param client_exposures: List of client FX positions and rate thresholds
+        :param active_forwards: List of existing forward contracts for expiry checks
+        :return: A FXAdvisorAlertBatch containing all relevant alerts.
         """
         alerts: List[FXAdvisorAlert] = []
 
-        # Process each client's exposure: rate levels, vol spike, forward expiry
+        # Process each individual client exposure for thresholds, vol, and expiry
         for exposure in client_exposures:
             alerts.extend(
                 self._process_exposure(
                     advisor_id, exposure,
-                    rate_ticks, active_forwards or []  # Default to empty list if not provided
+                    rate_ticks, active_forwards or []
                 )
             )
 
-        # Market-level check: parallel divergence applies to all clients in the corridor
+        # Check for market-wide parallel divergence events impacting the corridor
         for tick in rate_ticks:
             alert = self._check_parallel_divergence(advisor_id, tick)
             if alert:
                 alerts.append(alert)
 
-        # Sort by urgency so the advisor sees the most time-sensitive alerts first
+        # Sort the resulting alerts by urgency (IMMEDIATE -> LOW)
         alerts.sort(
-            key=lambda a: self._URGENCY_ORDER.get(a.urgency, 9)  # Unknown urgencies go last
+            key=lambda a: self._URGENCY_ORDER.get(a.urgency, 9)
         )
 
         return FXAdvisorAlertBatch(advisor_id=advisor_id, alerts=alerts)

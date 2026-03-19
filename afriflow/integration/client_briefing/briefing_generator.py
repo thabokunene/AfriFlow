@@ -1,135 +1,134 @@
-"""
-@file briefing_generator.py
-@description Pre-meeting client intelligence briefing generator.
+# Client Briefing Generator (Integration Version)
+#
+# We auto-generate a structured briefing 30 minutes before
+# any calendar event with a client. This is the single most
+# impactful RM-facing feature.
+#
+# Disclaimer: Portfolio project by Thabo Kunene. Not a
+# Standard Bank Group product. All data is simulated.
 
-             We auto-generate a structured briefing 30 minutes before
-             any calendar event with a client. This is the single most
-             impactful RM-facing feature. It transforms the RM from
-             someone who asks "how is business?" to someone who walks
-             in knowing more about the client's African operations than
-             the client's own CFO.
+# Future import for forward references in type hints
+from __future__ import annotations
 
-             This is the demo artifact that makes ExCo say "we want this
-             for every client meeting starting Monday."
-
-             DISCLAIMER: This project is not sanctioned by, affiliated with, or
-             endorsed by Standard Bank Group, MTN Group, or any of their subsidiaries.
-             It is a demonstration of concept, domain knowledge, and technical skill
-             built by Thabo Kunene for portfolio and learning purposes only.
-@author Thabo Kunene
-@created 2026-03-18
-"""
-
-# Standard-library imports used for typed data containers and timestamps
+# Standard-library imports for data modeling, dates, and typing
 from dataclasses import dataclass, field
 from datetime import datetime, date
 from typing import Dict, List, Optional
 import logging
+
+# Integration with the talking points processing engine
 from afriflow.integration.client_briefing.talking_points_engine import ProcessingTimeoutError
 
 
 # ---------------------------------------------------------------------------
-# Data model: lightweight value objects passed to the Jinja2 template layer
+# Data model: value objects passed to the rendering layer
 # ---------------------------------------------------------------------------
 
 @dataclass
 class ChangeEvent:
-    """Something that changed since the last meeting."""
+    """
+    Something that changed since the last meeting.
 
-    # The originating business domain (e.g. "forex", "cib")
+    :param domain: Originating business domain (e.g., 'forex')
+    :param description: Human-readable summary of the change
+    :param magnitude: Qualitative scale (e.g., 'HIGH', 'CRITICAL')
+    :param direction: Trend direction ('up', 'down', 'neutral')
+    """
+
     domain: str
-    # Human-readable summary of what changed
     description: str
-    # Qualitative scale: "LOW", "MEDIUM", "HIGH", "CRITICAL"
     magnitude: str
-    # Whether the change is positive or negative for the client: "up" / "down" / "neutral"
     direction: str
 
 
 @dataclass
 class Opportunity:
-    """A revenue opportunity for the RM to discuss."""
+    """
+    A revenue opportunity for the RM to discuss.
 
-    # Rank ordering — 1 is the highest-priority opportunity
+    :param rank: Ordering priority (1 = highest)
+    :param description: Short narrative of the opportunity surface
+    :param estimated_value_zar: Estimated annual revenue impact in ZAR
+    :param source_signal: Engine that surfaced this opportunity
+    :param talking_point: Natural-language opener for the RM
+    """
+
     rank: int
-    # Short description of the opportunity surface
     description: str
-    # Estimated annual revenue impact in South African Rand
     estimated_value_zar: float
-    # Which signal engine surfaced this opportunity
     source_signal: str
-    # The natural-language prompt the RM can use to open the conversation
     talking_point: str
 
 
 @dataclass
 class RiskAlert:
-    """A risk the RM should be aware of."""
+    """
+    A risk the RM should be aware of.
 
-    # The domain where the risk originates
+    :param domain: Domain where the risk originates
+    :param description: Plain-English description of the risk
+    :param severity: Severity classification (e.g., 'CRITICAL')
+    :param recommended_discussion_point: Suggested question for the client
+    """
+
     domain: str
-    # Plain-English description of the risk condition
     description: str
-    # Severity classification: "LOW", "MEDIUM", "HIGH", "CRITICAL"
     severity: str
-    # Suggested question or topic the RM can raise with the client
     recommended_discussion_point: str
 
 
 @dataclass
 class ClientBriefing:
-    """The complete pre-meeting client briefing."""
+    """
+    The complete pre-meeting client briefing artifact.
 
-    # Unique identifier from the golden-record store
+    :param client_golden_id: Unique identifier from the golden record
+    :param client_name: Resolved canonical client name
+    :param client_tier: Relationship tier (e.g., 'Platinum')
+    :param meeting_datetime: ISO datetime of the scheduled meeting
+    :param relationship_manager: Name of the assigned RM
+    :param total_relationship_value_zar: Aggregate ZAR value across domains
+    :param health_status: Top-level relationship health signal
+    :param domains_active: Flags indicating active data presence per domain
+    :param changes_since_last_meeting: notable changes detected recently
+    :param top_opportunities: Ranked revenue opportunities (max 5)
+    :param risk_alerts: Active risks requiring attention
+    :param talking_points: Prepared conversation starters (max 5)
+    :param last_meeting_date: ISO date of the previous meeting
+    :param generated_at: Timestamp of briefing generation
+    """
+
     client_golden_id: str
-    # Resolved canonical name used across all domains
     client_name: str
-    # Relationship tier: "Platinum", "Gold", "Silver", "Bronze"
     client_tier: str
-    # ISO datetime string of the scheduled meeting
     meeting_datetime: str
-    # Full name of the assigned relationship manager
     relationship_manager: str
-
-    # Aggregate ZAR value across all five domains
     total_relationship_value_zar: float
-    # Top-level health signal sourced from the golden record
     health_status: str
-    # Boolean flags indicating which domains have active data for this client
     domains_active: Dict[str, bool]
-
-    # Changes detected since the last recorded meeting with this client
     changes_since_last_meeting: List[ChangeEvent]
-    # Top revenue opportunities, capped at 5 in generate()
     top_opportunities: List[Opportunity]
-    # Active risk alerts derived from the golden-record signal fields
     risk_alerts: List[RiskAlert]
-    # Prepared natural-language talking points for the RM, capped at 5
     talking_points: List[str]
-
-    # ISO date string of the last recorded meeting, or None for first meetings
     last_meeting_date: Optional[str]
-    # Timestamp of when this briefing was generated
     generated_at: str
 
     def render_text(self) -> str:
         """
-        Render the briefing as plain text for display or email.
+        Render the briefing as a formatted plain-text string.
 
-        :return: A formatted multi-line string suitable for terminal
-                 output or plain-text email delivery to the RM.
+        :return: Multi-line string representation for email or terminal delivery.
         """
-
-        # Visual separator line used at the top, bottom, and between sections
+        # Visual separator for section boundaries
         separator = "=" * 60
 
-        # Build a compact one-liner showing which domains are active (Y/N)
+        # Compile active domain indicators
         domain_flags = ""
         for domain, active in self.domains_active.items():
             flag = "Y" if active else "N"
             domain_flags += f"  {domain.upper()}: {flag}"
 
-        # Summarise what has changed since the last meeting
+        # Build the 'What Changed' narrative
         changes_text = ""
         if self.changes_since_last_meeting:
             for change in self.changes_since_last_meeting:
@@ -138,10 +137,9 @@ class ClientBriefing:
                     f"{change.description}\n"
                 )
         else:
-            # Explicit fallback so the section is never visually empty
             changes_text = "  No significant changes detected.\n"
 
-        # Render each opportunity with its ZAR value and source signal
+        # Build the 'Top Opportunities' list
         opportunities_text = ""
         for opp in self.top_opportunities:
             opportunities_text += (
@@ -151,7 +149,7 @@ class ClientBriefing:
                 f"     Source: {opp.source_signal}\n\n"
             )
 
-        # Render each risk with severity and domain prefix
+        # Build the 'Risk Alerts' list
         risks_text = ""
         if self.risk_alerts:
             for risk in self.risk_alerts:
@@ -161,17 +159,17 @@ class ClientBriefing:
                     f"  Discuss: {risk.recommended_discussion_point}\n\n"
                 )
         else:
-            # Explicit fallback so the section is never visually empty
             risks_text = "  No active risk alerts.\n"
 
-        # Number each talking point so the RM can reference them quickly
+        # Build the 'Suggested Talking Points' list
         talking_points_text = ""
         for i, point in enumerate(self.talking_points, 1):
             talking_points_text += f"  {i}. {point}\n"
 
-        # Guard against None last_meeting_date (first-meeting scenario)
+        # Handle edge case where previous meeting date is missing
         last_meeting = self.last_meeting_date or "Unknown"
 
+        # Final assembly of the briefing card
         return f"""{separator}
 CLIENT BRIEFING: {self.client_name}
 Meeting: {self.meeting_datetime}

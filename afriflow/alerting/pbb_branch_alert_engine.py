@@ -7,7 +7,7 @@
              KYC document expiry, and salary capture opportunities from employers
              with low payroll banking penetration.
 @author Thabo Kunene
-@created 2026-03-18
+@created 2026-03-19
 """
 
 # PBB Branch Alert Engine
@@ -26,11 +26,13 @@
 # Disclaimer: Portfolio project by Thabo Kunene. Not a
 # Standard Bank Group product. All data is simulated.
 
-from __future__ import annotations  # PEP 563: postponed annotation evaluation
+# Future import for forward references in type hints
+from __future__ import annotations
 
-from dataclasses import dataclass, field  # Lightweight structured data with auto-__init__
-from datetime import datetime, timedelta, date  # Timestamps and KYC/dormancy date maths
-from typing import Dict, List, Optional          # Type annotations for safety and IDE support
+# Standard library imports for data classes, date/time logic, and typing
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, date
+from typing import Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -38,16 +40,13 @@ from typing import Dict, List, Optional          # Type annotations for safety a
 # ---------------------------------------------------------------------------
 
 # Days before statutory dormancy at which KYC expiry alerts fire.
-# 60 days gives the branch enough lead time to contact clients.
 _KYC_WARNING_DAYS = 60
 
 # Early warning window before the dormancy limit is hit.
-# An alert fires when 30 or fewer days remain before the account goes dormant.
-_DORMANCY_WARNING_DAYS = 30   # Days before statutory dormancy limit
+_DORMANCY_WARNING_DAYS = 30
 
 # South African statutory dormancy threshold: 90 days of inactivity.
-# After this, the account transitions to a dormant state with restricted access.
-_DORMANCY_LIMIT_DAYS = 90     # Dormancy after 90 days of inactivity
+_DORMANCY_LIMIT_DAYS = 90
 
 
 # ---------------------------------------------------------------------------
@@ -56,50 +55,54 @@ _DORMANCY_LIMIT_DAYS = 90     # Dormancy after 90 days of inactivity
 
 @dataclass
 class PBBBranchAlert:
-    """A single PBB branch-level alert.
+    """
+    A single PBB branch-level alert representing a risk or opportunity.
 
-    :param alert_id: Unique ID with prefix PBB-<TYPE>-<ACCT_OR_EMPLOYER_ID>
+    :param alert_id: Unique identifier for the alert
     :param branch_id: ID of the branch this alert is assigned to
     :param account_id: Account ID; 'N/A' for employer-level salary capture alerts
     :param client_name: Customer or employer name for dashboard display
-    :param alert_type: DORMANCY_RISK / BALANCE_SURGE / OVERDRAFT_RISK /
-                       PRODUCT_GAP / KYC_EXPIRY / SALARY_CAPTURE
-    :param urgency: IMMEDIATE / HIGH / MEDIUM / LOW
-    :param headline: One-line alert title for branch dashboard display
-    :param details: Expanded context for branch staff preparation
-    :param recommended_action: Specific next step for the branch team
+    :param alert_type: Category of PBB alert (e.g., DORMANCY_RISK)
+    :param urgency: Priority level for the branch (e.g., HIGH)
+    :param headline: Brief summary of the alert
+    :param details: In-depth context for branch staff preparation
+    :param recommended_action: Suggested next step for the branch team
     :param revenue_opportunity_zar: Estimated annual revenue if action is taken
-    :param created_at: ISO timestamp of alert generation
+    :param created_at: Timestamp when the alert was generated
     """
 
     alert_id: str
     branch_id: str
-    account_id: str             # 'N/A' for employer-level alerts (SALARY_CAPTURE)
+    account_id: str
     client_name: str
     alert_type: str
     urgency: str
     headline: str
     details: str
     recommended_action: str
-    revenue_opportunity_zar: float  # Estimated annual revenue opportunity from this alert
+    revenue_opportunity_zar: float
+    # Automatically capture the creation time of the alert
     created_at: str = field(
-        default_factory=lambda: datetime.now().isoformat()  # Auto-stamped at creation
+        default_factory=lambda: datetime.now().isoformat()
     )
 
 
 @dataclass
 class PBBBranchAlertBatch:
-    """Batch of all PBB alerts for a branch, sorted by urgency.
+    """
+    A collection of PBB alerts for a single branch's portfolio.
 
     :param branch_id: ID of the branch this batch belongs to
-    :param alerts: Priority-sorted list of PBBBranchAlert objects
-    :param total_opportunity_zar: Sum of revenue_opportunity_zar across all alerts
-    :param generated_at: ISO timestamp when the batch was built
+    :param alerts: List of PBBBranchAlert objects
+    :param total_opportunity_zar: Aggregate revenue opportunity across the batch
+    :param generated_at: When the batch was compiled
     """
 
     branch_id: str
     alerts: List[PBBBranchAlert]
-    total_opportunity_zar: float   # KPI: total revenue in the branch's action queue
+    # Sum of revenue opportunities for all alerts in the batch
+    total_opportunity_zar: float
+    # Timestamp marking the completion of batch generation
     generated_at: str = field(
         default_factory=lambda: datetime.now().isoformat()
     )
@@ -111,33 +114,8 @@ class PBBBranchAlertBatch:
 
 class PBBBranchAlertEngine:
     """
-    Generate PBB branch alerts from account and cell profiles.
-
-    Processes each account in the branch's portfolio through five account-level
-    detectors (dormancy, balance surge, overdraft, product gap, KYC), then
-    processes employer signals for salary capture opportunities. The combined
-    alert list is sorted by urgency before returning.
-
-    Intended recipient: PBB branch managers and branch relationship officers.
-
-    Usage::
-
-        engine = PBBBranchAlertEngine()
-        batch = engine.build_batch(
-            branch_id="BRANCH-CPT-042",
-            accounts=[
-                {
-                    "account_id": "ACC-001",
-                    "client_name": "John Dlamini",
-                    "account_type": "current",
-                    "average_balance": 12500,
-                    "days_since_last_txn": 55,
-                    "kyc_expiry_date": "2026-04-15",
-                    ...
-                }
-            ],
-            employer_signals=[...],
-        )
+    Engine responsible for identifying PBB risks and opportunities by
+    analysing customer account behavior and employer payroll data.
     """
 
     def build_batch(
@@ -147,39 +125,35 @@ class PBBBranchAlertEngine:
         employer_signals: Optional[List[Dict]] = None,
     ) -> PBBBranchAlertBatch:
         """
-        Build a sorted alert batch for a single branch.
+        Scan a branch's entire portfolio and generate a prioritized alert batch.
 
-        Runs all account-level detectors for each account, then processes
-        employer salary capture signals. Sorts the combined list by urgency.
-
-        :param branch_id: Branch identifier
-        :param accounts: List of account dicts for the branch's customer portfolio
-        :param employer_signals: Optional list of employer payroll signals for
-                                 salary capture opportunity detection
-        :return: PBBBranchAlertBatch sorted IMMEDIATE → LOW
+        :param branch_id: Unique ID of the target PBB branch
+        :param accounts: List of customer account profiles
+        :param employer_signals: List of employer payroll signals
+        :return: A PBBBranchAlertBatch sorted by urgency.
         """
         alerts: List[PBBBranchAlert] = []
 
-        # Run all five account-level detectors for each account in the branch portfolio
+        # Run all account-level detectors for each account in the branch portfolio
         for acct in accounts:
             alerts.extend(
                 self._process_account(branch_id, acct)
             )
 
-        # Process employer signals for salary capture opportunities (separate to accounts)
-        for signal in (employer_signals or []):  # Default to empty list if not provided
+        # Process employer signals for salary capture opportunities
+        for signal in (employer_signals or []):
             alert = self._salary_capture_alert(branch_id, signal)
             if alert:
                 alerts.append(alert)
 
-        # Sort by urgency: IMMEDIATE first, then HIGH, MEDIUM, LOW; unknown urgency last
+        # Sort by urgency (IMMEDIATE first) for branch productivity
         alerts.sort(
             key=lambda a: {
                 "IMMEDIATE": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3
             }.get(a.urgency, 9)
         )
 
-        # KPI: total revenue in the branch's current action queue
+        # Calculate the total revenue opportunity in the branch's action queue
         total = sum(a.revenue_opportunity_zar for a in alerts)
 
         return PBBBranchAlertBatch(
@@ -195,8 +169,8 @@ class PBBBranchAlertEngine:
         Run all account-level detectors for a single account.
 
         :param branch_id: Branch identifier
-        :param acct: Account dict with account_id, client_name, balances, dates
-        :return: List of PBBBranchAlert objects (may be empty)
+        :param acct: Combined account data dictionary
+        :return: List of generated PBBBranchAlert objects.
         """
         alerts: List[PBBBranchAlert] = []
 
