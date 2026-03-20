@@ -1,303 +1,125 @@
 """
-@file context_matching_engine.py
-@description Context matching engine for the Lekgotla module, linking incoming
-    business signals to relevant discussion threads and Knowledge Cards based on
-    signal type, client, country, and corridor.
-@author Thabo Kunene
-@created 2026-03-19
+Lekgotla Context Matching Engine
+
+DISCLAIMER: This project is not a sanctioned initiative
+of Standard Bank Group, MTN, or any affiliated entity.
+It is a demonstration of concept, domain knowledge,
+and data engineering skill by Thabo Kunene.
 """
 
 from __future__ import annotations
-
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Any
 import logging
+from datetime import datetime
 
 from afriflow.logging_config import get_logger
-from .thread_store import ThreadStore, Thread
-from .knowledge_card_store import KnowledgeCardStore, KnowledgeCard
+from afriflow.lekgotla.thread_store import Thread, ThreadStore
 
 logger = get_logger("lekgotla.context_matching")
 
 
 @dataclass
-class MatchResult:
-    """A matched thread or card with relevance score."""
-    item_type: str  # 'thread' or 'knowledge_card'
+class ContextQuery:
+    signal_type: Optional[str] = None
+    signal_id: Optional[str] = None
+    countries: List[str] = field(default_factory=list)
+    products: List[str] = field(default_factory=list)
+    client_golden_id: Optional[str] = None
+    corridor: Optional[str] = None
+    sector: Optional[str] = None
+
+
+@dataclass
+class ContextMatch:
+    item_type: str  # 'thread' or 'card'
     item_id: str
-    item: Any  # Thread or KnowledgeCard
-    relevance_score: float
+    relevance_score: float  # 0 to 100
     match_reasons: List[str]
 
 
 class ContextMatchingEngine:
-    """
-    Signal-to-content matching engine.
-
-    Matches incoming signals to relevant threads and Knowledge Cards
-    using multiple matching strategies:
-    - Signal type matching
-    - Client matching
-    - Country/corridor matching
-    - Tag similarity
-    """
-
-    def __init__(
-        self,
-        thread_store: ThreadStore,
-        card_store: KnowledgeCardStore,
-    ):
+    def __init__(self, thread_store: ThreadStore, card_store: Any) -> None:
         self.thread_store = thread_store
         self.card_store = card_store
-
-        # Weights for different matching factors
-        self.weights = {
-            "signal_type": 0.40,
-            "client": 0.25,
-            "country": 0.20,
-            "corridor": 0.15,
-        }
-
         logger.info("ContextMatchingEngine initialized")
 
-    def match_signal(
-        self,
-        signal_id: str,
-        signal_type: str,
-        client_id: Optional[str] = None,
-        client_name: Optional[str] = None,
-        country: Optional[str] = None,
-        corridor: Optional[str] = None,
-        limit: int = 10,
-    ) -> List[MatchResult]:
-        """
-        Find relevant threads and cards for a signal.
+    def find_relevant(self, query: ContextQuery, limit: int = 10) -> List[ContextMatch]:
+        matches: List[ContextMatch] = []
 
-        Args:
-            signal_id: Signal identifier
-            signal_type: Type of signal (e.g., 'EXPANSION')
-            client_id: Client this signal is for
-            client_name: Client name
-            country: Country code
-            corridor: Corridor (e.g., 'ZA > GH')
-            limit: Maximum results to return
+        # Find relevant threads
+        all_threads = self.thread_store.search_threads("", {})
+        for thread in all_threads:
+            score, reasons = self._score_thread(thread, query)
+            if score > 0:
+                matches.append(ContextMatch("thread", thread.thread_id, score, reasons))
 
-        Returns:
-            List of MatchResult objects sorted by relevance
-        """
-        results: List[MatchResult] = []
+        # Sort and limit
+        matches.sort(key=lambda x: x.relevance_score, reverse=True)
+        return matches[:limit]
 
-        # Match threads
-        thread_results = self._match_threads(
-            signal_type=signal_type,
-            client_id=client_id,
-            country=country,
-            corridor=corridor,
-            limit=limit,
-        )
-        results.extend(thread_results)
-
-        # Match Knowledge Cards
-        card_results = self._match_cards(
-            signal_type=signal_type,
-            country=country,
-            limit=limit // 2,
-        )
-        results.extend(card_results)
-
-        # Sort by relevance score
-        results.sort(key=lambda r: r.relevance_score, reverse=True)
-
-        logger.info(
-            f"Matched {len(results)} items for signal {signal_id}"
-        )
-
-        return results[:limit]
-
-    def _match_threads(
-        self,
-        signal_type: str,
-        client_id: Optional[str],
-        country: Optional[str],
-        corridor: Optional[str],
-        limit: int,
-    ) -> List[MatchResult]:
-        """Match threads to signal parameters."""
-        results: List[MatchResult] = []
-
-        # Search by signal type
-        threads = self.thread_store.search_threads(
-            signal_type=signal_type.lower() if signal_type else None,
-            country=country,
-            limit=limit * 2,
-        )
-
-        for thread in threads:
-            score, reasons = self._calculate_thread_score(
-                thread, signal_type, client_id, country, corridor
-            )
-
-            if score > 0.3:  # Minimum threshold
-                results.append(
-                    MatchResult(
-                        item_type="thread",
-                        item_id=thread.thread_id,
-                        item=thread,
-                        relevance_score=score,
-                        match_reasons=reasons,
-                    )
-                )
-
-        return results
-
-    def _calculate_thread_score(
-        self,
-        thread: Thread,
-        signal_type: Optional[str],
-        client_id: Optional[str],
-        country: Optional[str],
-        corridor: Optional[str],
-    ) -> Tuple[float, List[str]]:
-        """Calculate relevance score for a thread."""
+    def _score_thread(self, thread: Thread, query: ContextQuery) -> tuple[float, List[str]]:
         score = 0.0
         reasons = []
 
-        # Signal type match (40%)
-        if signal_type and thread.signal_type:
-            if signal_type.lower() == thread.signal_type.lower():
-                score += self.weights["signal_type"]
-                reasons.append(f"Signal type: {signal_type}")
+        # Signal match (highest weight)
+        if query.signal_id and thread.signal_id == query.signal_id:
+            score += 50
+            reasons.append("Exact signal match")
+        elif query.signal_type and thread.signal_type == query.signal_type:
+            score += 30
+            reasons.append(f"Signal type match: {query.signal_type}")
 
-        # Client match (25%)
-        if client_id and thread.client_id:
-            if client_id == thread.client_id:
-                score += self.weights["client"]
-                reasons.append(f"Client: {thread.client_name}")
+        # Country match
+        country_overlap = set(query.countries) & set(thread.countries)
+        if country_overlap:
+            score += 20 * len(country_overlap)
+            reasons.append(f"Country match: {', '.join(country_overlap)}")
 
-        # Country match (20%)
-        if country and thread.country:
-            if country == thread.country:
-                score += self.weights["country"]
-                reasons.append(f"Country: {country}")
+        # Product match
+        product_overlap = set(query.products) & set(thread.products)
+        if product_overlap:
+            score += 15 * len(product_overlap)
+            reasons.append(f"Product match: {', '.join(product_overlap)}")
 
-        # Corridor match (15%)
-        if corridor and thread.corridor:
-            if corridor == thread.corridor:
-                score += self.weights["corridor"]
-                reasons.append(f"Corridor: {corridor}")
+        # Corridor match
+        if query.corridor and thread.signal_id:
+             # In a real system, we'd lookup the corridor of the thread's signal
+             pass
 
-        return score, reasons
+        # Recency boost
+        try:
+            created_at = datetime.fromisoformat(thread.created_at)
+            days_old = (datetime.now() - created_at).days
+            if days_old < 30:
+                score += 10
+                reasons.append("Recent activity")
+        except:
+            pass
 
-    def _match_cards(
+        # Upvote boost
+        if thread.upvote_count > 10:
+            score += min(10, thread.upvote_count / 5)
+            reasons.append("Highly upvoted")
+
+        # Cap at 100
+        return min(100.0, score), reasons
+
+    def _score_card(self, card: Any, query: ContextQuery) -> float:
+        # Placeholder for knowledge card scoring
+        return 0.0
+
+    def _calculate_relevance(
         self,
-        signal_type: str,
-        country: Optional[str],
-        limit: int,
-    ) -> List[MatchResult]:
-        """Match Knowledge Cards to signal parameters."""
-        results: List[MatchResult] = []
-
-        cards = self.card_store.search_cards(
-            signal_type=signal_type,
-            country=country,
-            limit=limit,
-        )
-
-        for card in cards:
-            score = 0.0
-            reasons = []
-
-            # Signal type match
-            if card.signal_type == signal_type:
-                score += 0.7
-                reasons.append(f"Signal type: {signal_type}")
-
-            # Country match
-            if country and country in card.countries:
-                score += 0.3
-                reasons.append(f"Country: {country}")
-
-            if score > 0.5:
-                results.append(
-                    MatchResult(
-                        item_type="knowledge_card",
-                        item_id=card.card_id,
-                        item=card,
-                        relevance_score=score,
-                        match_reasons=reasons,
-                    )
-                )
-
-        return results
-
-    def get_context_summary(
-        self,
-        signal_type: str,
-        country: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        Get a context summary for a signal type.
-
-        Returns aggregated statistics about relevant content.
-        """
-        threads = self.thread_store.search_threads(
-            signal_type=signal_type.lower() if signal_type else None,
-            country=country,
-            limit=100,
-        )
-
-        cards = self.card_store.search_cards(
-            signal_type=signal_type,
-            country=country,
-            limit=50,
-        )
-
-        return {
-            "signal_type": signal_type,
-            "country": country,
-            "thread_count": len(threads),
-            "card_count": len(cards),
-            "total_upvotes": sum(t.upvotes for t in threads),
-            "total_replies": sum(t.reply_count for t in threads),
-            "avg_card_win_rate": (
-                sum(c.win_rate or 0 for c in cards) / len(cards)
-                if cards else 0
-            ),
-            "top_contributors": self._get_top_contributors(
-                threads, cards
-            ),
-        }
-
-    def _get_top_contributors(
-        self,
-        threads: List[Thread],
-        cards: List[KnowledgeCard],
-    ) -> List[Dict[str, Any]]:
-        """Get top contributors from threads and cards."""
-        contributor_stats: Dict[str, Dict[str, Any]] = {}
-
-        for thread in threads:
-            author = thread.author_name
-            if author not in contributor_stats:
-                contributor_stats[author] = {
-                    "name": author,
-                    "threads": 0,
-                    "upvotes": 0,
-                }
-            contributor_stats[author]["threads"] += 1
-            contributor_stats[author]["upvotes"] += thread.upvotes
-
-        for card in cards:
-            for contributor in card.contributors:
-                if contributor not in contributor_stats:
-                    contributor_stats[contributor] = {
-                        "name": contributor,
-                        "cards": 0,
-                    }
-                contributor_stats[contributor]["cards"] += 1
-
-        return sorted(
-            contributor_stats.values(),
-            key=lambda x: x.get("upvotes", 0) + x.get("cards", 0) * 10,
-            reverse=True,
-        )[:5]
+        tag_overlap: int,
+        country_match: bool,
+        signal_match: bool,
+        recency_days: int,
+        upvotes: int,
+        author_credibility: float,
+    ) -> float:
+        score = (tag_overlap * 5) + (30 if country_match else 0) + (40 if signal_match else 0)
+        # Apply decay for recency
+        decay = max(0.5, 1 - (recency_days / 365))
+        score *= decay
+        return min(100.0, score)

@@ -1,0 +1,41 @@
+# @file corridor_contract.yml
+# @description Data contract for Corridor Intelligence domain integration
+# @author Thabo Kunene
+# @created 2026-03-19
+
+contract:
+  name: "Corridor Intelligence Data Contract"
+  version: "1.0"
+  domain: "corridor"
+  owner: "Corridor Engineering Team"
+  description: >
+    We publish cross-border payment corridor health,
+    revenue attribution, and leakage signals to the
+    gold layer.
+
+schema:
+  format: "delta"
+  tables:
+    - name: "gold_corridor_health"
+      description: "Volume and client counts per corridor"
+    - name: "gold_corridor_revenue"
+      description: "Unified revenue attribution across 5 domains"
+    - name: "gold_corridor_leakage"
+      description: "Detected product gaps per corridor"
+
+quality:
+  completeness:
+    corridor_id: 1.0
+    total_volume: 1.0
+    revenue_zar: 0.95
+  freshness:
+    max_latency_hours: 24
+    sla_target: "daily-refresh"
+
+consumers:
+  - name: "Group ExCo Dashboard"
+    team: "AfriFlow Group ExCo"
+    usage: "Regional trade flow and revenue monitoring"
+  - name: "Relationship Managers"
+    team: "Standard Bank CIB"
+    usage: "Identifying cross-sell opportunities in specific corridors"

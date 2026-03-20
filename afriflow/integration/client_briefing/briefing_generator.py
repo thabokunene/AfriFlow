@@ -78,6 +78,23 @@ class RiskAlert:
 
 
 @dataclass
+class DomainSnapshot:
+    """
+    A snapshot of a client's status within a specific domain.
+
+    :param domain: Human-readable domain name (e.g., 'Forex')
+    :param is_active: Whether the client has active products in this domain
+    :param headline_metric: Primary metric label for this domain
+    :param change_since_last_meeting: Qualitative change description
+    """
+
+    domain: str
+    is_active: bool
+    headline_metric: str
+    change_since_last_meeting: Optional[str] = None
+
+
+@dataclass
 class ClientBriefing:
     """
     The complete pre-meeting client briefing artifact.
@@ -547,7 +564,7 @@ class BriefingGenerator:
     # retained here because the tests may exercise some of its methods.
     # -----------------------------------------------------------------------
 
-    domain_snapshots: List["DomainSnapshot"]          # type: ignore[name-defined]
+    domain_snapshots: List["DomainSnapshot"]
     changes_since_last_meeting: List[str]
     top_opportunities: List[Dict]
     risk_alerts: List[str]
@@ -721,7 +738,7 @@ class BriefingGenerator:
 
     def _build_domain_snapshots(
         self, golden_record: Dict
-    ) -> List["DomainSnapshot"]:  # type: ignore[name-defined]
+    ) -> List["DomainSnapshot"]:
         """
         Build DomainSnapshot objects from boolean golden-record flags.
 
@@ -740,7 +757,7 @@ class BriefingGenerator:
         for domain_name, flag_key in domain_map.items():
             is_active = golden_record.get(flag_key, False)
             snapshots.append(
-                DomainSnapshot(  # type: ignore[name-defined]
+                DomainSnapshot(
                     domain=domain_name,
                     is_active=is_active,
                     headline_metric="Active" if is_active else "No data",

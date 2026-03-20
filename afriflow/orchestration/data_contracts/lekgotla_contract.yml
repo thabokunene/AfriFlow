@@ -1,0 +1,44 @@
+# @file lekgotla_contract.yml
+# @description Data contract for Lekgotla (Collective Intelligence) domain integration
+# @author Thabo Kunene
+# @created 2026-03-19
+
+contract:
+  name: "Lekgotla Knowledge Data Contract"
+  version: "1.0"
+  domain: "lekgotla"
+  owner: "Lekgotla Platform Team"
+  description: >
+    We publish discussion threads, knowledge cards, and
+    practitioner contributions to the gold layer for
+    cross-domain wisdom sharing and analytics.
+
+schema:
+  format: "delta"
+  tables:
+    - name: "lekgotla_threads"
+      description: "Discussion threads anchored to signals"
+    - name: "lekgotla_posts"
+      description: "Individual posts within threads"
+    - name: "lekgotla_knowledge_cards"
+      description: "Graduated proven strategies"
+
+quality:
+  completeness:
+    thread_id: 1.0
+    author_id: 1.0
+    signal_id: 0.8 # Optional anchoring
+  moderation:
+    pii_scan_required: true
+    compliance_hold_enabled: true
+  freshness:
+    max_latency_seconds: 60
+    sla_target: "near-real-time"
+
+consumers:
+  - name: "Client Briefing Generator"
+    team: "AfriFlow RM Experience"
+    usage: "Surfacing relevant wisdom in RM briefings"
+  - name: "Lekgotla Analytics Dashboard"
+    team: "AfriFlow Group ExCo"
+    usage: "Platform health and participation metrics"

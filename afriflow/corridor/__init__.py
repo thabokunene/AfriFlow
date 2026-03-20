@@ -29,7 +29,7 @@ from .revenue_attribution import RevenueAttribution
 # Detection of client flow leakage to competitors
 from .leakage_detector import LeakageDetector
 # Analysis of formal banking vs mobile money (informal) flows
-from .formal_vs_informal import FormalVsInformalAnalyzer
+from .formal_vs_informal import FormalVsInformal
 
 # Current version of the corridor module
 __version__ = "1.0.0"
@@ -44,5 +44,5 @@ __all__ = [
     # Attribution and detection logic
     "RevenueAttribution",
     "LeakageDetector",
-    "FormalVsInformalAnalyzer",
+    "FormalVsInformal",
 ]

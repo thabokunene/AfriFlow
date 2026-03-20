@@ -29,6 +29,8 @@ from afriflow.exceptions import (
     SeasonalCalendarError,  # Seasonal adjustment failures
     BriefingGenerationError,  # RM briefing generation failures
     DataShadowError,  # Data shadow calculation failures
+    CorridorError,  # Corridor operation failures
+    LekgotlaError,  # Lekgotla operation failures
     DataQualityError,  # Data quality validation failures
     ConfigurationError,  # Configuration loading failures
     DataIngestionError,  # Data ingestion failures
@@ -61,6 +63,8 @@ __all__ = [
     "SeasonalCalendarError",
     "BriefingGenerationError",
     "DataShadowError",
+    "CorridorError",
+    "LekgotlaError",
     # Infrastructure exceptions - technical/operational errors
     "DataQualityError",
     "ConfigurationError",

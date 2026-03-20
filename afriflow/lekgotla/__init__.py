@@ -9,13 +9,13 @@
 
 # Import core Lekgotla components for re-export at package level
 # These are the main classes users will interact with
-from .thread_store import ThreadStore, Thread, Reply  # Thread management
+from .thread_store import ThreadStore, Thread, Post  # Thread management
 from .knowledge_card_store import KnowledgeCardStore, KnowledgeCard  # Knowledge curation
 from .context_matching_engine import ContextMatchingEngine  # Signal-thread matching
 from .notification_engine import NotificationEngine  # User notifications
 from .regulatory_channel import RegulatoryChannel  # Compliance posts
 from .contribution_tracker import ContributionTracker  # Gamification
-from .moderation import ContentModerator  # Content filtering
+from .moderation import Moderator  # Content filtering
 from .analytics import LekgotlaAnalytics  # Platform metrics
 
 # Package metadata
@@ -28,7 +28,7 @@ __all__ = [
     # Thread management classes
     "ThreadStore",  # Main thread CRUD and search
     "Thread",  # Thread data model
-    "Reply",  # Reply data model
+    "Post",  # Post data model
     # Knowledge card classes
     "KnowledgeCardStore",  # Knowledge card CRUD and graduation
     "KnowledgeCard",  # Knowledge card data model
@@ -39,6 +39,6 @@ __all__ = [
     "RegulatoryChannel",  # Compliance alert management
     "ContributionTracker",  # Points and leaderboard tracking
     # Moderation and analytics
-    "ContentModerator",  # Content filtering and review
+    "Moderator",  # Content filtering and review
     "LekgotlaAnalytics",  # Platform health metrics
 ]

@@ -17,6 +17,56 @@ from .shared_test_utils import (
     generate_utc_timestamp, mock_generator, assertions
 )
 
+from afriflow.lekgotla.thread_store import ThreadStore
+from afriflow.lekgotla.knowledge_card_store import KnowledgeCardStore
+from afriflow.lekgotla.notification_engine import NotificationEngine
+from afriflow.lekgotla.moderation import Moderator
+from afriflow.corridor.corridor_engine import CorridorEngine
+from afriflow.corridor.leakage_detector import LeakageDetector
+from afriflow.corridor.formal_vs_informal import FormalVsInformal
+
+
+@pytest.fixture
+def thread_store():
+    """Initialised Lekgotla ThreadStore."""
+    return ThreadStore()
+
+
+@pytest.fixture
+def card_store():
+    """Initialised Lekgotla KnowledgeCardStore."""
+    return KnowledgeCardStore()
+
+
+@pytest.fixture
+def notification_engine():
+    """Initialised Lekgotla NotificationEngine."""
+    return NotificationEngine()
+
+
+@pytest.fixture
+def moderator():
+    """Initialised Lekgotla Moderator."""
+    return Moderator()
+
+
+@pytest.fixture
+def corridor_engine():
+    """Initialised CorridorEngine."""
+    return CorridorEngine()
+
+
+@pytest.fixture
+def leakage_detector():
+    """Initialised LeakageDetector."""
+    return LeakageDetector()
+
+
+@pytest.fixture
+def formal_vs_informal():
+    """Initialised FormalVsInformal divergence detector."""
+    return FormalVsInformal()
+
 
 @pytest.fixture
 def sample_cib_payment():
@@ -190,7 +240,7 @@ def sample_payment():
 
 
 @pytest.fixture
-def sample_currency_event():
+def sample_currency_event_obj():
     """Generate a sample currency event for testing."""
     return generate_test_currency_event()
 
